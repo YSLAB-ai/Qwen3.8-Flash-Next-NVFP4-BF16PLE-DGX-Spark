@@ -16,14 +16,18 @@ FROM vllm/vllm-openai:qwen38-flash-next@sha256:fc120ece0a388cc0aa1caad4a9f1cd921
 ARG SP=/usr/local/lib/python3.12/dist-packages
 ARG PLE=${SP}/vllm/models/qwen3_8_flash_next/nvidia/ple_layer.py
 ARG QWEN_CONFIG=${SP}/vllm/models/qwen3_8_flash_next/config.py
+ARG QWEN_MODEL=${SP}/vllm/models/qwen3_8_flash_next/nvidia/model.py
+ARG QWEN_MTP=${SP}/vllm/models/qwen3_8_flash_next/nvidia/mtp.py
 
 COPY src/vllm_ple_mmap.py ${SP}/vllm_ple_mmap.py
 COPY src/patch_qwen4_exp_config.py /tmp/patch_qwen4_exp_config.py
+COPY src/patch_qwen4_exp_quantized_lm_head.py /tmp/patch_qwen4_exp_quantized_lm_head.py
 
 # Append the hook to the model file. No-op unless VLLM_PLE_MMAP=1 at runtime, so
 # the image still behaves exactly like upstream when the flag is off.
 RUN python3 /tmp/patch_qwen4_exp_config.py ${QWEN_CONFIG} \
+ && python3 /tmp/patch_qwen4_exp_quantized_lm_head.py ${QWEN_MODEL} ${QWEN_MTP} \
  && cp ${PLE} ${PLE}.orig \
  && printf '\n\n# --- qwen38-flash-dgx: serve the PLE n-gram table from disk (VLLM_PLE_MMAP=1) ---\nfrom vllm_ple_mmap import apply as _ple_mmap_apply\n_ple_mmap_apply(Qwen3_8FlashNextNGramEmbedding)\n' >> ${PLE} \
- && python3 -c "import ast; ast.parse(open('${PLE}').read()); ast.parse(open('${QWEN_CONFIG}').read()); print('vLLM sources patched OK')" \
- && rm /tmp/patch_qwen4_exp_config.py
+ && python3 -c "import ast; [ast.parse(open(path).read()) for path in ('${PLE}', '${QWEN_CONFIG}', '${QWEN_MODEL}', '${QWEN_MTP}')]; print('vLLM sources patched OK')" \
+ && rm /tmp/patch_qwen4_exp_config.py /tmp/patch_qwen4_exp_quantized_lm_head.py

@@ -16,6 +16,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vllm_ple_mmap as m  # noqa: E402
 import patch_qwen4_exp_config as config_compat  # noqa: E402
+import patch_qwen4_exp_quantized_lm_head as lm_head_compat  # noqa: E402
 
 source_fixture = """\
 class QwenTextConfig:
@@ -26,6 +27,17 @@ patched_fixture = config_compat.patch_source(source_fixture)
 assert 'layer_type == "qwen_sparse_attention"' in patched_fixture
 assert '"full_attention"' in patched_fixture
 assert config_compat.patch_source(patched_fixture) == patched_fixture
+
+lm_head_source_fixture = """\
+        self.lm_head = ParallelLMHead(
+            config.vocab_size,
+            config.hidden_size,
+            prefix=maybe_prefix(prefix, "lm_head"),
+        )
+"""
+lm_head_patched_fixture = lm_head_compat.patch_source(lm_head_source_fixture)
+assert "quant_config=self.quant_config," in lm_head_patched_fixture
+assert lm_head_compat.patch_source(lm_head_patched_fixture) == lm_head_patched_fixture
 
 fp8 = m._resolve_ple_dtype("F8_E4M3")
 assert fp8.torch_dtype == torch.float8_e4m3fn
