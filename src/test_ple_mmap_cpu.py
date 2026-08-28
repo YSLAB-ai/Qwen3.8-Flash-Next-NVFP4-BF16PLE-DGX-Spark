@@ -32,6 +32,13 @@ try:
 except ValueError as exc:
     assert "unsupported PLE shard dtype" in str(exc)
 
+assert m._read_required_scale("BF16", None) is None
+try:
+    m._read_required_scale("F8_E4M3", None)
+    raise AssertionError("FP8 PLE without a scale must fail")
+except RuntimeError as exc:
+    assert "FP8 shards without ngram_embedding.weight_scale" in str(exc)
+
 ROWS, COLS, PARTS = 100_000, 160, 8
 shard_size = -(-ROWS // PARTS)
 rng = np.random.default_rng(0)

@@ -73,10 +73,6 @@ _PLE_DTYPES = {
     "F8_E5M2": PleStorageDType(torch.float8_e5m2, 1, True),
     "BF16": PleStorageDType(torch.bfloat16, 2, False),
 }
-_FP8_DTYPES = {
-    "F8_E4M3": torch.float8_e4m3fn,
-    "F8_E5M2": torch.float8_e5m2,
-}
 
 
 def _resolve_ple_dtype(dtype_str: str) -> PleStorageDType:
@@ -346,6 +342,15 @@ def _read_scale(entry: tuple) -> torch.Tensor:
     raise ValueError(f"unsupported weight_scale dtype {dtype_str}")
 
 
+def _read_required_scale(dtype_str: str, scale_entry: tuple | None) -> torch.Tensor | None:
+    storage = _resolve_ple_dtype(dtype_str)
+    if not storage.needs_scale:
+        return None
+    if scale_entry is None:
+        raise RuntimeError("PLE mmap: FP8 shards without ngram_embedding.weight_scale")
+    return _read_scale(scale_entry)
+
+
 _REGISTRY: dict[str, nn.Module] = {}
 _OP_NAME = "ple_mmap_lookup"
 
@@ -465,14 +470,13 @@ def apply(cls: type) -> None:
         cols = shards.pop("__cols__")  # type: ignore[arg-type]
         if cols != self.head_dim:
             raise RuntimeError(f"PLE mmap: shard width {cols} != head_dim {self.head_dim}")
-        if dtype_str not in _FP8_DTYPES:
-            raise RuntimeError(f"PLE mmap: only FP8 shards are supported, got {dtype_str}")
-        if not hasattr(self, "_offload_weight_scale"):
-            if scale_entry is None:
-                raise RuntimeError("PLE mmap: FP8 shards without ngram_embedding.weight_scale")
+        storage = _resolve_ple_dtype(dtype_str)
+        if storage.needs_scale and not hasattr(self, "_offload_weight_scale"):
+            scale = _read_required_scale(dtype_str, scale_entry)
+            assert scale is not None
             self.register_buffer(
                 "_offload_weight_scale",
-                _read_scale(scale_entry).to(torch.accelerator.current_accelerator()),
+                scale.to(torch.accelerator.current_accelerator()),
                 persistent=False,
             )
         parts = int(self.split_ngram_parts)
