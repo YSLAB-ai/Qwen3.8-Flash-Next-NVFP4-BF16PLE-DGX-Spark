@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vllm_ple_mmap as m  # noqa: E402
 import patch_qwen4_exp_config as config_compat  # noqa: E402
 import patch_qwen4_exp_quantized_lm_head as lm_head_compat  # noqa: E402
+import patch_parallel_lm_head_linear_attrs as lm_head_attrs  # noqa: E402
 
 source_fixture = """\
 class QwenTextConfig:
@@ -50,6 +51,16 @@ mtp_lm_head_source_fixture = """\
 mtp_lm_head_patched_fixture = lm_head_compat.patch_source(mtp_lm_head_source_fixture)
 assert "                    quant_config=self.quant_config," in mtp_lm_head_patched_fixture
 assert '                    prefix="lm_head",' in mtp_lm_head_patched_fixture
+
+parallel_lm_head_fixture = """\
+        self.quant_config = quant_config
+        if bias:
+            self._register_bias()
+"""
+parallel_lm_head_patched = lm_head_attrs.patch_source(parallel_lm_head_fixture)
+assert "self.output_partition_sizes = [self.num_embeddings_per_partition]" in parallel_lm_head_patched
+assert "self.has_bias = bias" in parallel_lm_head_patched
+assert lm_head_attrs.patch_source(parallel_lm_head_patched) == parallel_lm_head_patched
 
 fp8 = m._resolve_ple_dtype("F8_E4M3")
 assert fp8.torch_dtype == torch.float8_e4m3fn
