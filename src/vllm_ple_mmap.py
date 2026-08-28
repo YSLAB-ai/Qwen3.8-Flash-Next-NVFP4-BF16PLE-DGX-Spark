@@ -207,6 +207,25 @@ class MmapPleTable:
                     pos += n
 
 
+def _open_ple_table(
+    shards: dict[int, tuple[str, int, int]],
+    shard_size: int,
+    cols: int,
+    dtype_str: str,
+    workers: int = 32,
+    chunk: int = 2048,
+) -> MmapPleTable:
+    storage = _resolve_ple_dtype(dtype_str)
+    return MmapPleTable(
+        shards,
+        shard_size,
+        _row_bytes(cols, storage),
+        storage.torch_dtype,
+        workers=workers,
+        chunk=chunk,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Placeholder that stands in for VocabParallelEmbedding
 # --------------------------------------------------------------------------- #
@@ -465,19 +484,23 @@ def apply(cls: type) -> None:
                 raise RuntimeError(
                     f"PLE mmap: shard {idx} has {rows} rows, expected {expected}"
                 )
-        table = MmapPleTable(
-            shards, shard_size, cols, _FP8_DTYPES[dtype_str],
+        table = _open_ple_table(
+            shards, shard_size, cols, dtype_str,
             workers=_env_int("VLLM_PLE_MMAP_WORKERS", 32),
             chunk=_env_int("VLLM_PLE_MMAP_CHUNK", 2048),
         )
         if _env_int("VLLM_PLE_MMAP_PREWARM", 0):
-            logger.info("PLE mmap: prewarming page cache (%.1f GiB)...", table.rows_total * cols / 2**30)
+            logger.info(
+                "PLE mmap: prewarming page cache (%.1f GiB)...",
+                table.rows_total * table.row_bytes / 2**30,
+            )
             table.prewarm()
         self.ngram_embedding.table = table
         logger.info(
             "PLE mmap: layer %d, %d shards, %d rows x %d B (%.1f GiB on disk), dtype %s, %d workers",
-            layer_idx, len(shards), table.rows_total, cols,
-            table.rows_total * cols / 2**30, dtype_str, table.pool._max_workers,
+            layer_idx, len(shards), table.rows_total, table.row_bytes,
+            table.rows_total * table.row_bytes / 2**30,
+            dtype_str, table.pool._max_workers,
         )
 
     def forward_impl(self, hidden_states, input_ids, query_start_loc, ngram_context,

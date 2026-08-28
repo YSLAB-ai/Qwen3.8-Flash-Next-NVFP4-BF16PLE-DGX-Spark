@@ -98,6 +98,73 @@ assert out.shape == (300, 16, COLS) and out.dtype == torch.float8_e4m3fn
 assert np.array_equal(out.view(torch.uint8).numpy().reshape(-1, COLS), table[ids_t.numpy().reshape(-1)])
 print("placeholder forward: OK (fp8 view, shape", tuple(out.shape), ")")
 
+# BF16 checkpoint path: exact values, a partial final shard, cross-shard ids,
+# duplicates, and a non-trivial safetensors data offset.
+BF_ROWS, BF_COLS, BF_PARTS = 1_031, 7, 8
+bf_shard_size = -(-BF_ROWS // BF_PARTS)
+bf_ref = (
+    torch.arange(BF_ROWS * BF_COLS, dtype=torch.float32)
+    .remainder(997)
+    .div(31)
+    .to(torch.bfloat16)
+    .reshape(BF_ROWS, BF_COLS)
+)
+bf_u8 = bf_ref.view(torch.uint8).numpy().reshape(BF_ROWS, BF_COLS * 2)
+bf_tmp = tempfile.mkdtemp()
+bf_file_of = {}
+for fi in range(2):
+    tensors = {"dummy.weight": np.arange(11, dtype=np.float32).tobytes()}
+    header = {
+        "dummy.weight": {
+            "dtype": "F32",
+            "shape": [11],
+            "data_offsets": [0, 11 * 4],
+        }
+    }
+    off = 11 * 4
+    for si in range(fi * 4, fi * 4 + 4):
+        rows = bf_u8[si * bf_shard_size : (si + 1) * bf_shard_size]
+        name = f"model.language_model.layers.1.ple.ple_embedding.ngram_embedding.shard_{si}.weight"
+        header[name] = {
+            "dtype": "BF16",
+            "shape": [len(rows), BF_COLS],
+            "data_offsets": [off, off + rows.nbytes],
+        }
+        tensors[name] = rows.tobytes()
+        off += rows.nbytes
+        bf_file_of[name] = f"model-plebf16-{fi}.safetensors"
+    hb = json.dumps(header).encode()
+    with open(os.path.join(bf_tmp, f"model-plebf16-{fi}.safetensors"), "wb") as f:
+        f.write(struct.pack("<Q", len(hb)))
+        f.write(hb)
+        for name in header:
+            f.write(tensors[name])
+with open(os.path.join(bf_tmp, "model.safetensors.index.json"), "w") as f:
+    json.dump({"weight_map": bf_file_of}, f)
+
+bf_shards, bf_dtype, bf_scale = m._find_shards(bf_tmp, 1)
+bf_cols = bf_shards.pop("__cols__")
+assert bf_dtype == "BF16" and bf_scale is None and bf_cols == BF_COLS
+bf_table = m._open_ple_table(
+    bf_shards,
+    bf_shard_size,
+    bf_cols,
+    bf_dtype,
+    workers=4,
+    chunk=32,
+)
+bf_ids_np = np.array(
+    [0, bf_shard_size - 1, bf_shard_size, BF_ROWS - 1, 3, 3],
+    dtype=np.int64,
+)
+bf_emb = m._MmapNgramEmbedding(BF_ROWS, BF_COLS)
+bf_emb.table = bf_table
+bf_got = bf_emb(torch.from_numpy(bf_ids_np))
+assert bf_got.dtype == torch.bfloat16
+assert torch.equal(bf_got.cpu(), bf_ref[torch.from_numpy(bf_ids_np)])
+assert bf_table.row_bytes == BF_COLS * 2
+print("placeholder forward: OK (bf16 exact values, shape", tuple(bf_got.shape), ")")
+
 # zeros path (no table)
 emb2 = m._MmapNgramEmbedding(ROWS, COLS)
 z = emb2(ids_t)
