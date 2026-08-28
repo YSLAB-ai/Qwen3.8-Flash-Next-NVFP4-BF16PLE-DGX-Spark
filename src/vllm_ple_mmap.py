@@ -49,6 +49,7 @@ import re
 import struct
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
@@ -58,10 +59,35 @@ import torch.nn as nn
 logger = logging.getLogger("vllm.ple_mmap")
 
 ENV_ENABLE = "VLLM_PLE_MMAP"
+
+
+@dataclass(frozen=True)
+class PleStorageDType:
+    torch_dtype: torch.dtype
+    itemsize: int
+    needs_scale: bool
+
+
+_PLE_DTYPES = {
+    "F8_E4M3": PleStorageDType(torch.float8_e4m3fn, 1, True),
+    "F8_E5M2": PleStorageDType(torch.float8_e5m2, 1, True),
+    "BF16": PleStorageDType(torch.bfloat16, 2, False),
+}
 _FP8_DTYPES = {
     "F8_E4M3": torch.float8_e4m3fn,
     "F8_E5M2": torch.float8_e5m2,
 }
+
+
+def _resolve_ple_dtype(dtype_str: str) -> PleStorageDType:
+    try:
+        return _PLE_DTYPES[dtype_str]
+    except KeyError as exc:
+        raise ValueError(f"unsupported PLE shard dtype {dtype_str}") from exc
+
+
+def _row_bytes(cols: int, storage_dtype: PleStorageDType) -> int:
+    return int(cols) * storage_dtype.itemsize
 
 
 def enabled() -> bool:

@@ -16,6 +16,22 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vllm_ple_mmap as m  # noqa: E402
 
+fp8 = m._resolve_ple_dtype("F8_E4M3")
+assert fp8.torch_dtype == torch.float8_e4m3fn
+assert fp8.itemsize == 1 and fp8.needs_scale is True
+assert m._row_bytes(160, fp8) == 160
+
+bf16 = m._resolve_ple_dtype("BF16")
+assert bf16.torch_dtype == torch.bfloat16
+assert bf16.itemsize == 2 and bf16.needs_scale is False
+assert m._row_bytes(160, bf16) == 320
+
+try:
+    m._resolve_ple_dtype("F32")
+    raise AssertionError("unsupported PLE dtype must fail")
+except ValueError as exc:
+    assert "unsupported PLE shard dtype" in str(exc)
+
 ROWS, COLS, PARTS = 100_000, 160, 8
 shard_size = -(-ROWS // PARTS)
 rng = np.random.default_rng(0)
