@@ -3,32 +3,38 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 
-NEEDLE = '''\
-            config.hidden_size,
-            prefix=maybe_prefix(prefix, "lm_head"),
-'''
 MARKER = "qwen38-flash-dgx: support a quantized lm_head checkpoint"
-REPLACEMENT = f'''\
-            config.hidden_size,
-            # {MARKER}
-            quant_config=self.quant_config,
-            prefix=maybe_prefix(prefix, "lm_head"),
-'''
+CONSTRUCTOR_HOOK = re.compile(
+    r'^(?P<indent>[ \t]+)config\.hidden_size,\n'
+    r'(?P=indent)prefix=maybe_prefix\(prefix, "lm_head"\),$',
+    re.MULTILINE,
+)
 
 
 def patch_source(source: str) -> str:
     if MARKER in source:
         return source
-    occurrences = source.count(NEEDLE)
+
+    def replacement(match: re.Match) -> str:
+        indent = match.group("indent")
+        return (
+            f"{indent}config.hidden_size,\n"
+            f"{indent}# {MARKER}\n"
+            f"{indent}quant_config=self.quant_config,\n"
+            f'{indent}prefix=maybe_prefix(prefix, "lm_head"),'
+        )
+
+    patched, occurrences = CONSTRUCTOR_HOOK.subn(replacement, source)
     if occurrences != 1:
         raise RuntimeError(
             "expected exactly one Qwen output-head constructor hook, "
             f"found {occurrences}"
         )
-    return source.replace(NEEDLE, REPLACEMENT, 1)
+    return patched
 
 
 def main(argv=None) -> int:
