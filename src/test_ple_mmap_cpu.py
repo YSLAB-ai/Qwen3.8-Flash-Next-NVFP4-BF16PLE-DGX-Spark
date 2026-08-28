@@ -37,6 +37,7 @@ lm_head_source_fixture = """\
 """
 lm_head_patched_fixture = lm_head_compat.patch_source(lm_head_source_fixture)
 assert "quant_config=self.quant_config," in lm_head_patched_fixture
+assert 'prefix="lm_head",' in lm_head_patched_fixture
 assert lm_head_compat.patch_source(lm_head_patched_fixture) == lm_head_patched_fixture
 
 mtp_lm_head_source_fixture = """\
@@ -48,6 +49,7 @@ mtp_lm_head_source_fixture = """\
 """
 mtp_lm_head_patched_fixture = lm_head_compat.patch_source(mtp_lm_head_source_fixture)
 assert "                    quant_config=self.quant_config," in mtp_lm_head_patched_fixture
+assert '                    prefix="lm_head",' in mtp_lm_head_patched_fixture
 
 fp8 = m._resolve_ple_dtype("F8_E4M3")
 assert fp8.torch_dtype == torch.float8_e4m3fn

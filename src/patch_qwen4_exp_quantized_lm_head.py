@@ -25,7 +25,7 @@ def patch_source(source: str) -> str:
             f"{indent}config.hidden_size,\n"
             f"{indent}# {MARKER}\n"
             f"{indent}quant_config=self.quant_config,\n"
-            f'{indent}prefix=maybe_prefix(prefix, "lm_head"),'
+            f'{indent}prefix="lm_head",'
         )
 
     patched, occurrences = CONSTRUCTOR_HOOK.subn(replacement, source)
