@@ -30,8 +30,14 @@ prefill is ~320k row reads ≈ 1.3 GB — under a second on NVMe — and natural
 and code hit a very concentrated set of n-grams, so the hot rows stay in the page
 cache after the first pass.
 
+That 160-byte row is the FP8 case. A BF16-preserving checkpoint uses 320 bytes per
+row, or 5 KB across 16 heads per token. The table is still lookup-only and therefore
+still suitable for file-backed access; the tradeoff is twice the storage traffic and
+page-cache footprint. The target Orcarouter revision stores all 128 PLE tensors in
+one 102,400,512,288-byte (95.37 GiB) safetensors file.
+
 So the table does not need to be resident. This repo `mmap`s the checkpoint's
-`model-plefp8-*.safetensors` shards and gathers rows on demand. That is exactly what
+PLE safetensors shards and gathers rows on demand. That is exactly what
 llama.cpp does with its GGUF — we just bring it to the vLLM path, which keeps the real
 QSA/GDN kernels and MTP.
 
@@ -46,13 +52,15 @@ class, `Qwen3_8FlashNextNGramEmbedding`, in three small ways:
 
 1. **`__init__`** — swap the 44/95 GiB `VocabParallelEmbedding` for a tiny
    placeholder. No large parameter is ever allocated. The placeholder's `forward(ids)`
-   gathers rows from `np.memmap` views of the shards (dedup + sort for locality, a
-   thread pool so page faults overlap), returns an fp8 tensor on the GPU.
+   gathers rows from dtype-aware `np.memmap` views of the shards (dedup + sort for
+   locality, a thread pool so page faults overlap), and returns an FP8 or BF16 tensor
+   on the GPU.
 
 2. **`load_weights`** — drop the 128 shard tensors on the floor (they're served from
-   disk) and keep only the global FP8 `weight_scale`, stored as
-   `_offload_weight_scale` — which the **unmodified** `Qwen3_8FlashNextPLELayer.
-   _dequantize_embeddings` already knows how to consume. Then open the memmaps.
+   disk), validate the complete layout, then open the memmaps. FP8 keeps its global
+   `weight_scale` in `_offload_weight_scale`, which the **unmodified** vLLM
+   dequantization path consumes. BF16 has no scale; the same stock vLLM method sees
+   a non-FP8 tensor and returns it unchanged.
 
 3. **`forward_impl`** — wrap the hashing+lookup in a custom op
    `vllm::ple_mmap_lookup`. This is the crucial bit for GB10 (below).
@@ -109,10 +117,13 @@ Two YaRN-specific traps, both handled by `scripts/serve.sh`:
 
 ## Correctness
 
-`src/test_ple_mmap_cpu.py` builds synthetic FP8 shards (with the real safetensors
-layout and non-trivial data offsets) and checks the mmap gather bit-for-bit against a
-reference `table[ids]`, including dedup, multi-shard spans, the fp8 view path used by
-the placeholder, and out-of-range → `IndexError`. It needs only numpy+torch (no GPU):
+`src/test_ple_mmap_cpu.py` builds synthetic FP8 and BF16 shards (with the real
+safetensors layout and non-trivial data offsets) and checks the mmap gather against
+a reference `table[ids]`, including exact BF16 values, dedup, multi-shard spans,
+partial final shards, the FP8 view path used by the placeholder, and out-of-range →
+`IndexError`. It also rejects unsupported dtypes, missing scale for FP8,
+missing/misnumbered shards, wrong row counts, and mixed embedding widths. It needs
+only numpy+torch (no GPU):
 
 ```bash
 docker run --rm -v "$PWD/src:/t" -w /t --entrypoint python3 qwen38-flash-dgx test_ple_mmap_cpu.py
@@ -134,6 +145,8 @@ gather turns the n-gram contribution to noise and the model degrades immediately
 - **First request into a cold region** of the table pays some NVMe I/O; it smooths out
   as the page cache warms. `PREWARM=1` streams the whole table once at boot (~10 s) for
   steadier first-request latency.
+- A BF16 PLE doubles bytes per gathered row and is 95.37 GiB on disk. On a 128 GB
+  Spark, keep `PREWARM=0` so the OS only retains the actually useful working set.
 
 ## Independent reproduction and the native offload path
 

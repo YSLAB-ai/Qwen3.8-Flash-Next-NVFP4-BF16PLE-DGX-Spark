@@ -1,20 +1,21 @@
 """vllm_ple_mmap — serve the Qwen3.8-Flash-Next N-gram (PLE) table from NVMe via mmap.
 
-Why: the 51B-parameter n-gram table is 44 GiB in FP8 and vLLM keeps it resident
-(GPU, or pinned host RAM with VLLM_PLE_CPU_OFFLOAD). On a DGX Spark / GX10 the
-host and the GPU share one 121 GiB pool, so neither fits next to the 78 GiB main
-model. But a token only ever touches 16 rows x 160 bytes of that table, so the
-table can live on disk and be served through the page cache — exactly what
-llama.cpp does with its GGUF mmap.
+Why: the 51B-parameter n-gram table is about 44 GiB in FP8 or 95.37 GiB in BF16,
+and vLLM normally keeps it resident (GPU, or pinned host RAM with
+VLLM_PLE_CPU_OFFLOAD). On a DGX Spark / GX10 the host and GPU share one 121 GiB
+pool, so a full BF16 table cannot fit beside the compute trunk and a useful KV
+cache. A token only touches 16 rows of that table, however, so the table can
+remain file-backed on NVMe and be served through the page cache — exactly what
+llama.cpp does with GGUF mmap.
 
 How: with VLLM_PLE_MMAP=1 this module patches ``Qwen3_8FlashNextNGramEmbedding``:
   * ``__init__`` swaps the 44/95 GiB ``VocabParallelEmbedding`` for a tiny
     placeholder whose ``forward(ids)`` gathers rows from ``np.memmap`` views of the
-    checkpoint's ``model-plefp8-*.safetensors`` shards (zero-copy, page-cache backed);
-  * ``load_weights`` drops the 128 shard tensors on the floor, keeps the global FP8
-    ``weight_scale`` (as ``_offload_weight_scale``, which the untouched
-    ``Qwen3_8FlashNextPLELayer._dequantize_embeddings`` already consumes) and opens
-    the memmaps.
+    checkpoint's PLE safetensors shards (zero-copy, page-cache backed);
+  * ``load_weights`` drops the 128 shard tensors on the floor and opens the
+    memmaps. FP8 retains the global ``weight_scale`` as
+    ``_offload_weight_scale``; BF16 needs no scale and stock vLLM passes those
+    embeddings through without dequantization.
   * ``forward_impl`` (hashing + lookup) is wrapped in a custom op
     ``vllm::ple_mmap_lookup`` so that (a) torch.compile treats it as opaque — the
     stock version trips an Inductor int64 indexing assert on sm_121 — and (b) it can
@@ -30,8 +31,8 @@ Knobs (env):
   VLLM_PLE_MMAP_WORKERS=32   gather threads (page faults overlap across threads)
   VLLM_PLE_MMAP_CHUNK=2048   rows per gather task
   VLLM_PLE_MMAP_PREWARM=0    1 = stream the whole table once at load to fill the
-                             page cache with whatever memory is free (harmless,
-                             evictable; ~10 s at 4.7 GB/s)
+                             page cache with whatever memory is free. Keep this
+                             at 0 for a 95.37 GiB BF16 table on a 128 GB system.
 
 Install: the Dockerfile copies this file next to vllm and appends
 ``_ple_mmap_apply(Qwen3_8FlashNextNGramEmbedding)`` to the end of
@@ -262,7 +263,11 @@ class _MmapNgramEmbedding(nn.Module):
 # --------------------------------------------------------------------------- #
 def _find_shards(
     model_path: str, layer_idx: int
-) -> tuple[dict[int, tuple[str, int, int]], str | None, tuple[str, int, int] | None]:
+) -> tuple[
+    dict[int, tuple[str, int, int]],
+    str | None,
+    tuple[str, int, int, str] | None,
+]:
     """Locate ``layers.<idx>.ple.ple_embedding.ngram_embedding.shard_N.weight``.
 
     Returns (shards, dtype_str, scale_entry) where scale_entry is
@@ -290,7 +295,8 @@ def _find_shards(
 
     shards: dict[int, tuple[str, int, int]] = {}
     dtype_str: str | None = None
-    scale_entry: tuple[str, int, int] | None = None
+    scale_entry: tuple[str, int, int, str] | None = None
+    shard_cols: int | None = None
     for path in files:
         header, data_start = parse_safetensors_header(path)
         for name, meta in header.items():
@@ -304,13 +310,20 @@ def _find_shards(
                     raise ValueError("PLE shards have mixed dtypes")
                 if end - start != rows * cols * _itemsize(dtype_str):
                     raise ValueError(f"PLE shard {name}: size/shape mismatch")
+                if shard_cols is None:
+                    shard_cols = cols
+                elif cols != shard_cols:
+                    raise ValueError(
+                        "PLE shards have mixed widths: "
+                        f"expected {shard_cols}, got {cols} for {name}"
+                    )
                 shards[int(m.group(1))] = (path, data_start + start, rows)
-                shard_cols = cols
             elif scale_re.search(name):
                 start, end = meta["data_offsets"]
-                scale_entry = (path, data_start + start, end - start, meta["dtype"])  # type: ignore[assignment]
+                scale_entry = (path, data_start + start, end - start, meta["dtype"])
     if shards:
         # Return cols through dtype_str consumer; keep it simple: stash on dict.
+        assert shard_cols is not None
         shards["__cols__"] = shard_cols  # type: ignore[index]
     return shards, dtype_str, scale_entry
 
@@ -349,6 +362,27 @@ def _read_required_scale(dtype_str: str, scale_entry: tuple | None) -> torch.Ten
     if scale_entry is None:
         raise RuntimeError("PLE mmap: FP8 shards without ngram_embedding.weight_scale")
     return _read_scale(scale_entry)
+
+
+def _validate_shard_layout(
+    shards: dict[int, tuple[str, int, int]],
+    parts: int,
+    vocab: int,
+) -> int:
+    expected_indices = list(range(parts))
+    actual_indices = sorted(shards)
+    if actual_indices != expected_indices:
+        raise RuntimeError(
+            f"PLE shard indices {actual_indices}, expected {expected_indices}"
+        )
+    shard_size = math.ceil(vocab / parts)
+    for idx, (_path, _offset, rows) in shards.items():
+        expected_rows = max(0, min(shard_size, vocab - idx * shard_size))
+        if rows != expected_rows:
+            raise RuntimeError(
+                f"PLE shard {idx} has {rows} rows, expected {expected_rows}"
+            )
+    return shard_size
 
 
 _REGISTRY: dict[str, nn.Module] = {}
@@ -481,13 +515,7 @@ def apply(cls: type) -> None:
             )
         parts = int(self.split_ngram_parts)
         vocab = int(self.ngram_embedding.org_vocab_size)
-        shard_size = math.ceil(vocab / parts)
-        for idx, (_p, _o, rows) in shards.items():
-            expected = max(0, min(shard_size, vocab - idx * shard_size))
-            if rows != expected:
-                raise RuntimeError(
-                    f"PLE mmap: shard {idx} has {rows} rows, expected {expected}"
-                )
+        shard_size = _validate_shard_layout(shards, parts, vocab)
         table = _open_ple_table(
             shards, shard_size, cols, dtype_str,
             workers=_env_int("VLLM_PLE_MMAP_WORKERS", 32),

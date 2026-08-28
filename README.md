@@ -11,6 +11,15 @@ of. This repo adds one patch to the official vLLM image that **serves that table
 NVMe via `mmap`** instead of keeping it resident. Weights drop to **~76 GiB**, the
 rest of the pool goes to KV, and everything runs on stock GB10 kernels.
 
+This branch also supports checkpoints that preserve the complete PLE in **BF16**.
+For `orcarouter/Qwen3.8-Flash-Next-Uncensored-NVFP4` revision
+`3a3b63161c0745390e5270179af42e46efc70799`, the untouched PLE is
+102,400,512,288 bytes (95.37 GiB) in one safetensors file. The patch reads its 128
+BF16 tensors directly from NVMe; it does not quantize, rewrite, or copy the table
+into unified memory. The BF16 path has exact synthetic-test coverage against the
+pinned image below. Single-Spark runtime qualification is tracked separately until
+the full checkpoint, context, and memory gates pass.
+
 > **Independently reproduced** on a DGX Spark (not a GX10) by
 > [@jschmied](https://github.com/jschmied) — see
 > [issue #1](https://github.com/blazux/qwen3.8-Flash-DGX/issues/1) and their
@@ -117,10 +126,11 @@ Method and harness: [load-and-waits.md](https://github.com/jschmied/qwen38-flash
 
 ## How it fits — the one idea
 
-A token's n-gram lookup reads **16 rows × 160 bytes ≈ 2.5 KB**. Over a 20k-token
+A token's n-gram lookup reads **16 rows × 160 bytes ≈ 2.5 KB** for FP8, or
+**16 rows × 320 bytes ≈ 5 KB** for BF16. Over a 20k-token
 prefill that's ~1.3 GB of small reads — under a second on NVMe, and the hot n-grams
 stay in the page cache. So the 44 GiB table never needs to be in the unified pool:
-we `mmap` the checkpoint's `model-plefp8-*.safetensors` shards and gather rows on
+we `mmap` the checkpoint's PLE safetensors shards and gather rows on
 demand. Nothing else about the model changes — the hashing, dequant, and the sparse
 attention all run stock.
 
@@ -182,6 +192,11 @@ docker run --rm -v "$PWD/src:/t" -w /t --entrypoint python3 \
   (pinned staging buffer) is a natural next optimization — PRs welcome.
 - **Weights are not included** and the checkpoint carries Qwen's license (with a
   MAU/revenue clause) — review it before production use.
+- For BF16 PLE on a 128 GB machine, leave `PREWARM=0`: reading the entire 95.37 GiB
+  table eagerly would compete with the compute trunk and KV cache for page cache.
+- This is a community runtime patch, not an official vLLM feature. Its checkpoint
+  audit intentionally rejects unsupported dtypes, missing/misnumbered shards,
+  incorrect row counts, mixed widths, and FP8 layouts without a scale.
 
 ## Credits
 

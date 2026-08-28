@@ -1,4 +1,4 @@
-"""CPU unit test for vllm_ple_mmap: synthetic FP8 shards -> gather == reference.
+"""CPU tests for dtype-aware PLE mmap gathering and checkpoint validation.
 
 Run inside the vLLM image (needs numpy + torch, no GPU):
   docker run --rm -v $PWD:/t -w /t --entrypoint python3 vllm/vllm-openai:qwen38-flash-next test_ple_mmap_cpu.py
@@ -171,6 +171,50 @@ assert bf_got.dtype == torch.bfloat16
 assert torch.equal(bf_got.cpu(), bf_ref[torch.from_numpy(bf_ids_np)])
 assert bf_table.row_bytes == BF_COLS * 2
 print("placeholder forward: OK (bf16 exact values, shape", tuple(bf_got.shape), ")")
+
+width_tmp = tempfile.mkdtemp()
+width_names = [
+    "model.language_model.layers.1.ple.ple_embedding.ngram_embedding.shard_0.weight",
+    "model.language_model.layers.1.ple.ple_embedding.ngram_embedding.shard_1.weight",
+]
+width_header = {
+    width_names[0]: {"dtype": "BF16", "shape": [1, 7], "data_offsets": [0, 14]},
+    width_names[1]: {"dtype": "BF16", "shape": [1, 8], "data_offsets": [14, 30]},
+}
+width_hb = json.dumps(width_header).encode()
+width_file = os.path.join(width_tmp, "model-width.safetensors")
+with open(width_file, "wb") as f:
+    f.write(struct.pack("<Q", len(width_hb)))
+    f.write(width_hb)
+    f.write(bytes(30))
+with open(os.path.join(width_tmp, "model.safetensors.index.json"), "w") as f:
+    json.dump({"weight_map": {name: "model-width.safetensors" for name in width_names}}, f)
+try:
+    m._find_shards(width_tmp, 1)
+    raise AssertionError("mixed PLE shard widths must fail")
+except ValueError as exc:
+    assert "mixed widths" in str(exc)
+
+layout_shards = {
+    0: ("a", 0, 9),
+    1: ("b", 0, 9),
+    2: ("c", 0, 7),
+}
+assert m._validate_shard_layout(layout_shards, parts=3, vocab=25) == 9
+
+try:
+    m._validate_shard_layout({0: layout_shards[0], 2: layout_shards[2]}, parts=3, vocab=25)
+    raise AssertionError("a missing middle PLE shard must fail")
+except RuntimeError as exc:
+    assert "PLE shard indices" in str(exc) and "[0, 2]" in str(exc)
+
+bad_rows = dict(layout_shards)
+bad_rows[2] = ("c", 0, 6)
+try:
+    m._validate_shard_layout(bad_rows, parts=3, vocab=25)
+    raise AssertionError("a PLE shard with the wrong row count must fail")
+except RuntimeError as exc:
+    assert "PLE shard 2 has 6 rows, expected 7" in str(exc)
 
 # zeros path (no table)
 emb2 = m._MmapNgramEmbedding(ROWS, COLS)
