@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import json
 import time
@@ -24,15 +25,54 @@ def validate(kind: str, response: dict) -> bool:
     if kind == "json":
         return json.loads(content) == {"product": 323}
     if kind == "code":
-        namespace: dict[str, object] = {}
-        exec(content, namespace)
-        return callable(namespace.get("square")) and namespace["square"](9) == 81
+        return _is_exact_square_function(content)
     if kind == "tool":
         calls = message.get("tool_calls") or []
         return bool(calls and calls[0].get("function", {}).get("name") == "get_weather")
     if kind == "vision":
         return json.loads(content) == {"red_squares": 3, "blue_circles": 2}
     raise ValueError(f"unknown fixture: {kind}")
+
+
+def _is_exact_square_function(source: str) -> bool:
+    """Validate the fixture's one safe function without executing model output."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, TypeError):
+        return False
+    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
+        return False
+    function = tree.body[0]
+    arguments = function.args
+    if (
+        function.name != "square"
+        or function.decorator_list
+        or function.returns is not None
+        or getattr(function, "type_params", ())
+        or arguments.posonlyargs
+        or len(arguments.args) != 1
+        or arguments.args[0].arg != "n"
+        or arguments.args[0].annotation is not None
+        or arguments.vararg is not None
+        or arguments.kwonlyargs
+        or arguments.kw_defaults
+        or arguments.kwarg is not None
+        or arguments.defaults
+        or len(function.body) != 1
+        or not isinstance(function.body[0], ast.Return)
+    ):
+        return False
+    value = function.body[0].value
+    return (
+        isinstance(value, ast.BinOp)
+        and isinstance(value.op, ast.Mult)
+        and isinstance(value.left, ast.Name)
+        and value.left.id == "n"
+        and isinstance(value.left.ctx, ast.Load)
+        and isinstance(value.right, ast.Name)
+        and value.right.id == "n"
+        and isinstance(value.right.ctx, ast.Load)
+    )
 
 
 def payload(kind: str, model: str, image: Path | None) -> dict[str, object]:

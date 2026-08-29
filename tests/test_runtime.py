@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import posixpath
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 from recipe.download import snapshot_path
+from recipe.hybrid import build_hybrid_view
 from recipe.manifest import ModelRef, load_manifest
 from recipe.runtime import (
     RuntimeConfigurationError,
@@ -57,7 +60,7 @@ class RuntimeTests(unittest.TestCase):
 
         joined = " ".join(command)
         self.assertIn("127.0.0.1:18300:8000", joined)
-        self.assertIn(":/hf:ro", joined)
+        self.assertIn(f"{cache}:/recipe/{cache.name}:ro", joined)
         self.assertIn("--restart no", joined)
         self.assertIn("--gpu-memory-utilization 0.8", joined)
         self.assertIn("--max-num-seqs 8", joined)
@@ -119,10 +122,42 @@ class RuntimeTests(unittest.TestCase):
             target = load_manifest(ROOT / "compatibility.json").target("radixark")
             command = build_docker_command(target, hybrid_model_path(cache), cache, RuntimeOptions())
 
-        joined = " ".join(command)
-        self.assertIn(f"-v {cache.parent / 'recipe-views'}:/recipe-views:ro", joined)
-        self.assertIn(" /recipe-views/radixark/", joined)
-        self.assertNotIn(f"-v {cache.parent}:/recipe:ro", joined)
+        mounts = docker_mounts(command)
+        self.assertEqual(set(mounts), {cache, cache.parent / "recipe-views"})
+        self.assertEqual(mounts[cache].parent, mounts[cache.parent / "recipe-views"].parent)
+        self.assertNotIn(cache.parent, mounts)
+
+    def test_every_hybrid_index_shard_resolves_under_rendered_mounts(self):
+        """Host-relative view symlinks must retain their topology in the container."""
+        from tests.test_hybrid import load_weight_map, make_target_and_source
+
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            target_snapshot, source_snapshot, target = make_target_and_source(temporary)
+            cache = temporary / "cache"
+            view = build_hybrid_view(
+                target_snapshot,
+                source_snapshot,
+                temporary / "recipe-views",
+                target,
+            )
+            command = build_docker_command(target, view, cache, RuntimeOptions())
+            mounts = docker_mounts(command)
+            image_index = command.index("qwen38-flash-dgx")
+            model_in_container = PurePosixPath(command[image_index + 1])
+
+            for filename in set(load_weight_map(view).values()):
+                with self.subTest(filename=filename):
+                    host_link = view / filename
+                    link_in_container = model_in_container / filename
+                    resolved_in_container = PurePosixPath(
+                        posixpath.normpath(
+                            str(link_in_container.parent / os.readlink(host_link))
+                        )
+                    )
+                    resolved_on_host = host_link.resolve(strict=True)
+                    expected = mounts[cache] / resolved_on_host.relative_to(cache)
+                    self.assertEqual(resolved_in_container, expected)
 
     def test_environment_rejects_low_memory_and_target_disk_without_override(self):
         options = RuntimeOptions()
@@ -146,6 +181,17 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertEqual((report.mem_available_bytes, report.disk_free_bytes), (1, 1))
         self.assertGreaterEqual(len(report.warnings), 3)
+
+
+def docker_mounts(command: list[str]) -> dict[Path, PurePosixPath]:
+    mounts: dict[Path, PurePosixPath] = {}
+    for index, token in enumerate(command):
+        if token != "-v":
+            continue
+        host, container, mode = command[index + 1].rsplit(":", 2)
+        if mode == "ro":
+            mounts[Path(host)] = PurePosixPath(container)
+    return mounts
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable, Sequence
@@ -63,6 +64,7 @@ def download_target(
     """Download a pinned target and return its local snapshot or audited hybrid view."""
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
+    _require_free_space(cache, target.minimum_free_bytes)
     target_ref = ModelRef(target.repo_id, target.revision)
     runner(build_hf_download_command(target_ref, (), cache, image), check=True)
     target_snapshot = snapshot_path(cache, target_ref)
@@ -185,3 +187,14 @@ def _validate_filenames(filenames: Sequence[str]) -> None:
 def _validate_image(image: str) -> None:
     if not isinstance(image, str) or not image:
         raise DownloadError("Docker image is required")
+
+
+def _require_free_space(cache: Path, minimum_free_bytes: int) -> None:
+    try:
+        free_bytes = shutil.disk_usage(cache).free
+    except OSError as exc:
+        raise DownloadError("unable to inspect free disk space on the download cache") from exc
+    if free_bytes < minimum_free_bytes:
+        raise DownloadError(
+            f"free disk {free_bytes} is below required {minimum_free_bytes} bytes"
+        )

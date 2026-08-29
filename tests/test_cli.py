@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+import shlex
 from unittest.mock import patch
 
 from recipe.cli import main
@@ -56,6 +57,31 @@ class CliTests(unittest.TestCase):
         download.assert_called_once()
         audit.assert_called_once_with(resolved, target, (Path("/safe/cache"),))
 
+    def test_login_and_download_share_the_requested_cache_contract(self):
+        """CLI authentication must populate the same mounted cache used by download."""
+        cache = Path("/safe/shared-hf-cache")
+        with patch("recipe.cli.login") as authenticate:
+            self.assertEqual(
+                main(
+                    ["login", "--cache", str(cache), "--image", "hf-client"],
+                    manifest_path=ROOT / "compatibility.json",
+                ),
+                0,
+            )
+        authenticate.assert_called_once_with(cache, "hf-client")
+
+        with patch("recipe.cli.download_target", return_value=Path("/safe/model")) as download, redirect_stdout(
+            io.StringIO()
+        ):
+            self.assertEqual(
+                main(
+                    ["download", "inferact", "--cache", str(cache), "--image", "hf-client"],
+                    manifest_path=ROOT / "compatibility.json",
+                ),
+                0,
+            )
+        self.assertEqual(download.call_args.args[1:], (cache, "hf-client"))
+
     def test_dry_run_renders_a_command_without_calling_docker(self):
         output = io.StringIO()
         with patch("recipe.cli.validate_environment") as validate, redirect_stdout(output):
@@ -89,9 +115,10 @@ class CliTests(unittest.TestCase):
                 self.fail(f"dry-run rejected the requested image: {exc}")
 
         self.assertEqual(exit_code, 0)
-        self.assertIn(
-            "yslab-qwen38-flash-next-bf16ple:0.1.0-rc1", output.getvalue()
-        )
+        requested = "yslab-qwen38-flash-next-bf16ple:0.1.0-rc1"
+        tokens = shlex.split(output.getvalue())
+        self.assertEqual(tokens.count(requested), 1)
+        self.assertNotIn("qwen38-flash-dgx", tokens)
 
     def test_serve_refuses_existing_container_without_replace(self):
         runner = _FakeRunner(existing=True)

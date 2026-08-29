@@ -8,7 +8,6 @@
       "correct": true,
       "decode_seconds": 3.990852701012045,
       "decode_tokens_per_second": 27.31245880670027,
-      "passed": true,
       "total_seconds": 9.3750580890337,
       "ttft_seconds": 5.336349158082157,
       "usage": {
@@ -21,7 +20,6 @@
       "correct": true,
       "decode_seconds": 3.831323641934432,
       "decode_tokens_per_second": 28.188691453241702,
-      "passed": true,
       "total_seconds": 7.284673657966778,
       "ttft_seconds": 3.4003906020661816,
       "usage": {

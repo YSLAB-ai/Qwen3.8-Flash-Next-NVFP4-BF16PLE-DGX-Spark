@@ -48,10 +48,10 @@ including pinned revisions, are in [Compatibility](docs/COMPATIBILITY.md).
 ## Quick start
 
 ```bash
-git clone https://github.com/blazux/qwen3.8-Flash-DGX.git
-cd qwen3.8-Flash-DGX
+git clone https://github.com/YSLAB-ai/Qwen3.8-Flash-Next-NVFP4-BF16PLE-DGX-Spark.git
+cd Qwen3.8-Flash-Next-NVFP4-BF16PLE-DGX-Spark
 docker build -t qwen38-flash-dgx .
-huggingface-cli login
+scripts/qwen38-dgx-spark login
 scripts/download-weights.sh
 scripts/serve.sh
 ```

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,6 +32,20 @@ def radixark_target() -> Target:
         ),
         minimum_free_bytes=1,
         expected_ple=PleExpectation(128, 128, 160, "BF16", 1, 128),
+    )
+
+
+def direct_target() -> Target:
+    return Target(
+        name="direct",
+        repo_id="example/direct",
+        revision="a" * 40,
+        mode="direct_bf16",
+        served_model_name="direct",
+        requires_auth=False,
+        ple_source=None,
+        minimum_free_bytes=10**30,
+        expected_ple=PleExpectation(1, 1, 1, "BF16", 1, 1),
     )
 
 
@@ -151,6 +166,36 @@ class DownloadTests(unittest.TestCase):
 
             with self.assertRaises(DownloadError):
                 download_target(target, cache, "qwen38-flash-dgx", runner=incomplete_index)
+
+    def test_direct_download_rejects_low_cache_space_before_downloader_starts(self):
+        """The target disk gate must run before the first direct download command."""
+        with tempfile.TemporaryDirectory() as directory:
+            calls: list[list[str]] = []
+            target = direct_target()
+            with self.assertRaisesRegex(DownloadError, "free disk"):
+                download_target(
+                    target,
+                    Path(directory) / "hf-cache",
+                    "qwen38-flash-dgx",
+                    runner=lambda command, **_kwargs: calls.append(command),
+                )
+
+        self.assertEqual(calls, [])
+
+    def test_hybrid_download_rejects_low_cache_space_before_downloader_starts(self):
+        """Hybrid preparation must enforce its target gate before any source download."""
+        with tempfile.TemporaryDirectory() as directory:
+            calls: list[list[str]] = []
+            target = replace(radixark_target(), minimum_free_bytes=10**30)
+            with self.assertRaisesRegex(DownloadError, "free disk"):
+                download_target(
+                    target,
+                    Path(directory) / "hf-cache",
+                    "qwen38-flash-dgx",
+                    runner=lambda command, **_kwargs: calls.append(command),
+                )
+
+        self.assertEqual(calls, [])
 
 
 def snapshot_path(cache: Path, ref: ModelRef | Target) -> Path:

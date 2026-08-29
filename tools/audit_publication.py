@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import argparse
+import os
 import re
 import subprocess
 import sys
@@ -13,7 +15,14 @@ from pathlib import Path
 MAX_FILE_BYTES = 10 * 1024 * 1024
 TEST_FIXTURE_MARKER = "# publication-audit: allow-test-fixture"
 WEIGHT_SUFFIXES = {".bin", ".ckpt", ".gguf", ".onnx", ".pt", ".pth", ".safetensors"}
-PRIVATE_TERMS = ("llm." + "labtools" + ".studio", "labtools" + ".studio")
+PRIVATE_TERMS = (
+    "lab" + "tools",
+    "cloud" + "flare",
+    "/home/" + "yiwen",
+    "open" + "code",
+    "pal" + "world",
+    ".config/" + "systemd/user/",
+)
 ASSIGNMENT_PATTERN = re.compile(
     r"(?m)^\s*(?:export\s+)?[A-Z0-9_]*(?:API[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|ACCESS[_-]?KEY)[A-Z0-9_]*\s*[:=]"
 )
@@ -35,6 +44,32 @@ def git_tracked_files(root: Path) -> list[Path]:
         stdout=subprocess.PIPE,
     )
     return [root / Path(name) for name in result.stdout.decode("utf-8").split("\0") if name]
+
+
+def all_files(root: Path) -> list[Path]:
+    """Return every non-``.git`` entry without following directory symlinks."""
+    files: list[Path] = []
+
+    def visit(directory: Path) -> None:
+        try:
+            with os.scandir(directory) as iterator:
+                entries = sorted(iterator, key=lambda entry: entry.name)
+        except OSError:
+            files.append(directory)
+            return
+        for entry in entries:
+            if entry.name == ".git":
+                continue
+            path = Path(entry.path)
+            if entry.is_symlink():
+                files.append(path)
+            elif entry.is_dir(follow_symlinks=False):
+                visit(path)
+            else:
+                files.append(path)
+
+    visit(root)
+    return files
 
 
 def audit_tree(root: Path, tracked_files: list[Path]) -> list[Finding]:
@@ -104,13 +139,34 @@ def _is_allowed_test_fixture(root: Path, path: Path) -> bool:
         return False
 
 
-def main() -> int:
-    root = Path(__file__).resolve().parents[1]
-    files = [
-        path
-        for path in git_tracked_files(root)
-        if not path.is_relative_to(root / "docs/superpowers")
-    ]
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="repository tree to audit",
+    )
+    parser.add_argument(
+        "--all-files",
+        action="store_true",
+        help="scan every non-.git file instead of only Git-tracked files",
+    )
+    args = parser.parse_args(argv)
+    try:
+        root = args.root.resolve(strict=True)
+    except OSError:
+        parser.error("--root must be an existing directory")
+    if not root.is_dir():
+        parser.error("--root must be an existing directory")
+    if args.all_files:
+        files = all_files(root)
+    else:
+        files = [
+            path
+            for path in git_tracked_files(root)
+            if not path.is_relative_to(root / "docs/superpowers")
+        ]
     findings = audit_tree(root, files)
     for finding in findings:
         print(f"{finding.code}: {finding.path}: {finding.detail}", file=sys.stderr)

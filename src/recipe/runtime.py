@@ -15,6 +15,8 @@ from .manifest import Target
 DEFAULT_IMAGE = "qwen38-flash-dgx"
 RECIPE_LABEL = "qwen38-flash-next-bf16-ple"
 MIN_MEM_AVAILABLE_BYTES = 100 * 1024**3
+_CONTAINER_RECIPE_ROOT = Path("/recipe")
+_CONTAINER_VIEWS = _CONTAINER_RECIPE_ROOT / "recipe-views"
 _SPLITTING_OPS = (
     '["vllm::unified_attention_with_output","vllm::unified_mla_attention_with_output",'
     '"vllm::mamba_mixer2","vllm::mamba_mixer","vllm::short_conv",'
@@ -100,7 +102,10 @@ def build_docker_command(
     if model != expected:
         raise RuntimeConfigurationError("model path is not the exact pinned local snapshot")
 
-    model_in_container, extra_mounts = _model_mounts(model, cache)
+    cache_in_container = _CONTAINER_RECIPE_ROOT / cache.name
+    model_in_container, extra_mounts = _model_mounts(
+        model, cache, cache_in_container
+    )
     container_name = container_name_for(target)
     return [
         "docker",
@@ -122,10 +127,10 @@ def build_docker_command(
         "-p",
         f"{options.bind}:{options.port}:8000",
         "-v",
-        f"{cache}:/hf:ro",
+        f"{cache}:{cache_in_container}:ro",
         *extra_mounts,
         "-e",
-        "HF_HOME=/hf",
+        f"HF_HOME={cache_in_container}",
         "-e",
         "HF_HUB_OFFLINE=1",
         "-e",
@@ -256,16 +261,21 @@ def _require_local_path(value: Path, label: str) -> Path:
     return value.resolve(strict=False)
 
 
-def _model_mounts(model: Path, cache: Path) -> tuple[Path, tuple[str, ...]]:
+def _model_mounts(
+    model: Path, cache: Path, cache_in_container: Path
+) -> tuple[Path, tuple[str, ...]]:
     try:
-        return Path("/hf") / model.relative_to(cache), ()
+        return cache_in_container / model.relative_to(cache), ()
     except ValueError:
         recipe_views = (cache.parent / "recipe-views").resolve(strict=False)
         try:
             relative = model.relative_to(recipe_views)
         except ValueError as exc:
             raise RuntimeConfigurationError("model path is outside the approved local cache") from exc
-        return Path("/recipe-views") / relative, ("-v", f"{recipe_views}:/recipe-views:ro")
+        return _CONTAINER_VIEWS / relative, (
+            "-v",
+            f"{recipe_views}:{_CONTAINER_VIEWS}:ro",
+        )
 
 
 def _mem_available_bytes() -> int:

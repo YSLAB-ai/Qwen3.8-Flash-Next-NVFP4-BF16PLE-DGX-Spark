@@ -6,7 +6,7 @@ Log in with a Hugging Face account that has accepted the selected checkpoint's a
 conditions:
 
 ```bash
-huggingface-cli login
+scripts/qwen38-dgx-spark login
 ```
 
 Then rerun the recipe's download command. Do not bypass the checkpoint selection or
@@ -38,8 +38,14 @@ unsupported, not a tuning result. Depths 2-4 were not run for this checkpoint.
 ## Replacing a running recipe container
 
 The serve command unloads an existing recipe container before it starts a replacement.
-If a prior attempt ended unexpectedly, rerun the same guarded command rather than
-starting an additional container manually.
+If the default Orcarouter attempt ended unexpectedly, run the exact guarded replacement:
+
+```bash
+scripts/qwen38-dgx-spark serve orca-uncensored --replace
+```
+
+For another manifest target, replace `orca-uncensored` with that target alias. Do not
+start an additional container manually.
 
 For supported target layouts, see [Compatibility](COMPATIBILITY.md). Benchmark scope
 and limitations are in [Benchmarks](BENCHMARKS.md).

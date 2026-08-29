@@ -51,9 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     probes = []
     while True:
         probes.append(run_probe(args.base_url, args.model, args.timeout))
-        if time.monotonic() + args.interval_seconds > deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             break
-        time.sleep(args.interval_seconds)
+        time.sleep(min(args.interval_seconds, remaining))
     write_report(args.output, {"sampler": thinking_medium_sampler(), "requested_duration_seconds": args.duration_seconds, "interval_seconds": args.interval_seconds, "elapsed_seconds": time.monotonic() - started, "probes": probes})
     return 0 if all(probe["passed"] for probe in probes) else 1
 

@@ -1,5 +1,7 @@
 """Contract tests for the public documentation set."""
 
+# publication-audit: allow-test-fixture
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,10 +33,41 @@ class PublicationDocumentationTests(unittest.TestCase):
     def test_only_orcarouter_is_runtime_validated(self) -> None:
         docs = "\n".join(path.read_text() for path in PUBLIC_DOCS)
         self.assertIn("Measured results - Orcarouter checkpoint only", docs)
-        self.assertIn("Inferact", docs)
-        self.assertIn("runtime unvalidated", docs)
-        self.assertIn("RadixArk", docs)
-        self.assertIn("runtime unvalidated", docs)
+        readme_rows = README.read_text(encoding="utf-8").splitlines()
+        compatibility_rows = (ROOT / "docs" / "COMPATIBILITY.md").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        for target in ("Inferact", "RadixArk"):
+            with self.subTest(target=target, document="README"):
+                row = next(line for line in readme_rows if line.startswith(f"| {target} |"))
+                self.assertIn("runtime unvalidated", row)
+            with self.subTest(target=target, document="compatibility"):
+                row = next(
+                    line for line in compatibility_rows if line.startswith(f"| {target} |")
+                )
+                self.assertIn("runtime unvalidated", row)
+
+    def test_quick_start_uses_publication_clone_and_recipe_login(self) -> None:
+        """Quick-start auth must populate the recipe-local cache used by downloads."""
+        docs = "\n".join(path.read_text(encoding="utf-8") for path in PUBLIC_DOCS)
+        expected_url = (
+            "https://github.com/YSLAB-ai/"
+            "Qwen3.8-Flash-Next-NVFP4-BF16PLE-DGX-Spark.git"
+        )
+        self.assertIn(f"git clone {expected_url}", README.read_text(encoding="utf-8"))
+        self.assertIn("scripts/qwen38-dgx-spark login", docs)
+        self.assertNotIn("github.com/blazux/qwen3.8-Flash-DGX", docs)
+        self.assertNotIn("huggingface-cli login", docs)
+
+    def test_troubleshooting_shows_target_specific_replace_command(self) -> None:
+        """Recovery guidance must include the target required by the serve parser."""
+        troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "scripts/qwen38-dgx-spark serve orca-uncensored --replace",
+            troubleshooting,
+        )
 
     def test_private_deployment_terms_are_absent(self) -> None:
         forbidden = ("llm.labtools", "Cloudflare", "/home/yiwen", "OpenCode", "Palworld")
