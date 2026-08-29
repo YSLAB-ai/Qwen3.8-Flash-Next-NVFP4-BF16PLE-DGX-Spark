@@ -23,8 +23,10 @@ on one DGX Spark. They do not describe Inferact or RadixArk runtime performance.
 
 - The MTP load guard verified 31/31 expected tensors. The compact BF16 MTP file is
   4.86 GiB.
-- An MTP depth sweep selected `MTP=2`: 57.13 tok/s median versus 31.12 tok/s at
-  `MTP=0`, an 83.6% increase under the tested short-request method.
+- A single-stream MTP depth sweep selected `MTP=2`: 44.23 tok/s end-to-end,
+  including hidden reasoning and first-visible latency, versus 27.26 tok/s
+  at `MTP=0`, a 62.2% increase. Its separately measured visible-answer phase was
+  46.15 tok/s, with 1.324s to first visible content.
 - Native 262,144-token startup used 76.21 GiB for model loading and exposed 17.37
   GiB of BF16 KV, enough for 627,960 cached tokens (2.40 concurrent native windows).
 - Exact retrieval passed at 240,051 prompt tokens, with 116.80s TTFT and 2,055.17

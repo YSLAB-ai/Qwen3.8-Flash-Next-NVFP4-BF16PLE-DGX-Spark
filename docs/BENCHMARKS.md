@@ -10,31 +10,41 @@ also use the exact 31 BF16 MTP tensors from pinned
 `7b719225242aacd3dbd3f9407468c2ee9a9d2594`. Inferact and RadixArk are not
 runtime-qualified by these results.
 
-## BF16 MTP depth sweep
+## Single-stream BF16 MTP depth sweep
 
 The load guard verified 31/31 tensors before accepting requests. Each depth used a
-32,768-token server profile, one maximum sequence, 0.80 GPU-memory utilization, one
-128-token warm-up, then three fixed 256-token streamed samples. The table reports
-the median decode rate and TTFT. Thinking mode used medium reasoning effort,
+32,768-token server profile, `concurrency=1`, one maximum sequence, 0.80 GPU-memory
+utilization, one 128-token warm-up, then three fixed 256-token streamed samples.
+The primary rate divides all completion tokens—including hidden reasoning—by total
+request wall time, so it also includes latency before visible content. The next
+column is the median time from request start to the first visible content delta.
+Thinking mode used medium reasoning effort,
 `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0.0`,
 `presence_penalty=0.0`, and `repetition_penalty=1.0`.
 
-| MTP depth | Median decode tok/s | Median TTFT | Aggregate acceptance |
+| MTP depth | Median end-to-end completion tok/s | Time to first visible content | Aggregate acceptance |
 | ---: | ---: | ---: | ---: |
-| 0 | 31.12 | 1.196s | n/a |
-| 1 | 39.16 | 1.206s | 305/463 (65.9%) |
-| **2** | **57.13** | 1.324s | **532/722 (73.7%)** |
-| 3 | 55.55 | 1.629s | 563/993 (56.7%) |
-| 4 | 51.04 | 1.123s | 611/1,148 (53.2%) |
-| 5 | 45.19 | 1.249s | 454/1,560 (29.1%) |
-| 6 | 44.43 | 1.429s | 516/1,230 (42.0%) |
-| 8 | 37.89 | 1.758s | 487/1,600 (30.4%) |
-| 10 | 36.32 | 1.648s | 642/2,150 (29.9%) |
+| 0 | 27.26 | 1.196s | n/a |
+| 1 | 33.17 | 1.206s | 305/463 (65.9%) |
+| **2** | **44.23** | **1.324s** | **532/722 (73.7%)** |
+| 3 | 40.95 | 1.629s | 563/993 (56.7%) |
+| 4 | 41.84 | 1.123s | 611/1,148 (53.2%) |
+| 5 | 35.45 | 1.249s | 454/1,560 (29.1%) |
+| 6 | 35.71 | 1.429s | 516/1,230 (42.0%) |
+| 8 | 30.43 | 1.758s | 487/1,600 (30.4%) |
+| 10 | 28.31 | 1.648s | 642/2,150 (29.9%) |
 
-`MTP=2` is the qualified selection. It was 83.6% faster than `MTP=0` in this
-specific short-request measurement. Higher draft depths lost enough acceptance to
-cost more verification work than they saved. Depths five and above require the
-recipe's 48-token block alignment for the QSA speculative ring.
+`MTP=2` is the qualified selection. It was 62.2% faster end-to-end than `MTP=0`
+in this single-stream short-request measurement. For MTP2, retained reasoning-token
+accounting also gives a separate median visible-answer phase rate of 46.15 tok/s,
+measured from the first through last visible content token. That rate excludes hidden
+reasoning and must not be combined with total completion-token counts.
+
+An earlier revision did combine all completion tokens with a visible-content-only
+time interval. That mixed metric has been superseded and is not comparable to either
+rate above. Higher draft depths lost enough acceptance to cost more verification
+work than they saved. Depths five and above require the recipe's 48-token block
+alignment for the QSA speculative ring.
 
 The machine-readable record is
 [`mtp-bf16-sweep.json`](../results/orcarouter/mtp-bf16-sweep.json).

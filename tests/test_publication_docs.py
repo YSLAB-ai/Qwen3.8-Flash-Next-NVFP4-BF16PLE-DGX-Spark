@@ -93,7 +93,10 @@ class PublicationDocumentationTests(unittest.TestCase):
         self.assertIn("orca-uncensored-bf16-mtp", docs)
         self.assertIn("31/31", docs)
         self.assertIn("MTP=2", docs)
-        self.assertIn("57.13 tok/s", docs)
+        self.assertIn("44.23 tok/s", docs)
+        self.assertIn("46.15 tok/s", docs)
+        self.assertIn("single-stream", docs)
+        self.assertNotIn("57.13 tok/s", docs)
         self.assertIn("240,051 prompt tokens", docs)
         for stale_claim in (
             "requires `MTP=0`",
@@ -111,9 +114,29 @@ class PublicationDocumentationTests(unittest.TestCase):
             )
         )
         self.assertEqual(record["selected_depth"], 2)
+        self.assertEqual(record["concurrency"], 1)
         self.assertEqual([row["depth"] for row in record["results"]], [0, 1, 2, 3, 4, 5, 6, 8, 10])
         selected = next(row for row in record["results"] if row["depth"] == 2)
-        self.assertEqual(selected["median_decode_tokens_per_second"], 57.1303)
+        baseline = next(row for row in record["results"] if row["depth"] == 0)
+        self.assertEqual(
+            selected["median_end_to_end_completion_tokens_per_second"],
+            44.2286,
+        )
+        self.assertEqual(
+            selected["median_visible_content_tokens_per_second"],
+            46.1523,
+        )
+        self.assertEqual(
+            selected["median_time_to_first_visible_content_seconds"],
+            1.32445,
+        )
+        self.assertEqual(
+            baseline["median_end_to_end_completion_tokens_per_second"],
+            27.2645,
+        )
+        self.assertFalse(
+            [row for row in record["results"] if "median_decode_tokens_per_second" in row]
+        )
         self.assertEqual(record["mtp_overlay"]["loaded_tensors"], 31)
 
     def test_private_deployment_terms_are_absent(self) -> None:
