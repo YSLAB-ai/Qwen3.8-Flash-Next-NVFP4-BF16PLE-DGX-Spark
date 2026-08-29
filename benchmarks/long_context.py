@@ -6,7 +6,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from common import bounded, endpoint, request_json, stream_completion, thinking_medium_sampler, write_report
+from common import (
+    bounded,
+    request_json,
+    root_endpoint,
+    stream_completion,
+    thinking_medium_sampler,
+    write_report,
+)
 
 
 NEEDLE = "MOUNTAIN-CINDER-240079"
@@ -25,7 +32,7 @@ def calibrate(base_url: str, model: str, target: int, timeout: float) -> tuple[l
     history = []
     for _ in range(5):
         messages, metadata = build_messages(repetitions)
-        tokenized = request_json(endpoint(base_url, "tokenize"), {"model": model, "messages": messages, "add_generation_prompt": True, "chat_template_kwargs": thinking_medium_sampler()["chat_template_kwargs"]}, timeout)
+        tokenized = request_json(root_endpoint(base_url, "tokenize"), {"model": model, "messages": messages, "add_generation_prompt": True, "chat_template_kwargs": thinking_medium_sampler()["chat_template_kwargs"]}, timeout)
         count = int(tokenized["count"])
         history.append({"filler_repetitions": repetitions, "prompt_tokens": count})
         if target <= count <= target + 80:

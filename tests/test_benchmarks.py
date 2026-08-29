@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "benchmarks"))
 
 from functional import validate  # noqa: E402
+import long_context  # noqa: E402
 import stability  # noqa: E402
 
 
@@ -99,6 +100,23 @@ class StabilityBenchmarkTests(unittest.TestCase):
         self.assertEqual(report["probes"], [{"passed": True}] * 3)
         self.assertGreaterEqual(report["elapsed_seconds"], 10.0)
         self.assertEqual(exit_code, 0)
+
+
+class LongContextBenchmarkTests(unittest.TestCase):
+    def test_tokenization_uses_server_root_when_api_base_ends_in_v1(self):
+        urls: list[str] = []
+
+        def tokenize(url, _payload, _timeout):
+            urls.append(url)
+            return {"count": 240_000}
+
+        with patch.object(long_context, "request_json", side_effect=tokenize):
+            _messages, context = long_context.calibrate(
+                "http://127.0.0.1:18300/v1", "fixture-model", 240_000, 1.0
+            )
+
+        self.assertEqual(urls, ["http://127.0.0.1:18300/tokenize"])
+        self.assertEqual(context["tokenize_count"], 240_000)
 
 
 if __name__ == "__main__":
