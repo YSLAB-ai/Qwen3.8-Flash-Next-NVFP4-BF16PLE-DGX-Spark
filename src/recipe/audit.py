@@ -9,7 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from .manifest import Target
-from .safetensors import SafetensorsError, TensorMeta, read_header
+from .safetensors import (
+    DuplicateJsonKeyError,
+    SafetensorsError,
+    TensorMeta,
+    read_header,
+    strict_json_loads,
+)
 
 
 class AuditError(ValueError):
@@ -220,7 +226,9 @@ def _load_weight_map(model_dir: Path) -> dict[str, str]:
 
 def _load_json_object(path: Path, label: str) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = strict_json_loads(path.read_text(encoding="utf-8"))
+    except DuplicateJsonKeyError as exc:
+        raise AuditError(str(exc)) from exc
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise AuditError(f"unable to read {label}: {path}") from exc
     if not isinstance(value, dict):

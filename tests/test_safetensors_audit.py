@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from recipe.audit import AuditError, audit_checkpoint
-from recipe.manifest import PleExpectation, Target
+from recipe.manifest import ModelRef, PleExpectation, Target
 from recipe.safetensors import SafetensorsError, read_header
 
 
@@ -150,6 +150,62 @@ class SafetensorsAuditTests(unittest.TestCase):
             with assert_raises(AuditError, "index/header disagreement"):
                 audit_checkpoint(model_dir, target, (root,))
 
+    def test_audit_rejects_duplicate_recipe_metadata_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target, model_dir, root = make_checkpoint(Path(directory))
+            hybrid_target = Target(
+                name=target.name,
+                repo_id=target.repo_id,
+                revision=target.revision,
+                mode="hybrid_bf16",
+                served_model_name=target.served_model_name,
+                requires_auth=target.requires_auth,
+                ple_source=ModelRef("example/source", "b" * 40),
+                minimum_free_bytes=target.minimum_free_bytes,
+                expected_ple=target.expected_ple,
+            )
+            (model_dir / "recipe-metadata.json").write_text(
+                '{"target":{"repo_id":"example/approved","repo_id":"example/approved",'
+                '"revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},'
+                '"ple_source":{"repo_id":"example/source",'
+                '"revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}',
+                encoding="utf-8",
+            )
+
+            with assert_raises(AuditError, "duplicate JSON key"):
+                audit_checkpoint(model_dir, hybrid_target, (root,))
+
+    def test_audit_rejects_duplicate_config_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target, model_dir, root = make_checkpoint(Path(directory))
+            (model_dir / "config.json").write_text(
+                '{"architectures":["Qwen4ExpForConditionalGeneration"],'
+                '"architectures":["Qwen4ExpForConditionalGeneration"],'
+                '"model_type":"qwen4_exp","text_config":'
+                '{"model_type":"qwen4_exp_text","ple_layer_ids":[2],'
+                '"split_ngram_parts":4,"ngram_size":3,"heads_per_ngram":8,'
+                '"ple_embed_dim":112}}',
+                encoding="utf-8",
+            )
+
+            with assert_raises(AuditError, "duplicate JSON key"):
+                audit_checkpoint(model_dir, target, (root,))
+
+    def test_audit_rejects_duplicate_index_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target, model_dir, root = make_checkpoint(Path(directory))
+            valid_index = (model_dir / "model.safetensors.index.json").read_text(
+                encoding="utf-8"
+            )
+            (model_dir / "model.safetensors.index.json").write_text(
+                '{"weight_map":' + valid_index.partition(":")[2].rsplit("}", 1)[0]
+                + ',"weight_map":' + valid_index.partition(":")[2].rsplit("}", 1)[0] + "}",
+                encoding="utf-8",
+            )
+
+            with assert_raises(AuditError, "duplicate JSON key"):
+                audit_checkpoint(model_dir, target, (root,))
+
     def test_read_header_rejects_truncated_header_length(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "truncated.safetensors"
@@ -177,6 +233,18 @@ class SafetensorsAuditTests(unittest.TestCase):
             path.write_bytes(struct.pack("<Q", len(encoded)) + encoded + bytes(98))
 
             with assert_raises(SafetensorsError, "contiguous"):
+                read_header(path)
+
+    def test_read_header_rejects_duplicate_tensor_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "duplicate.safetensors"
+            header = (
+                '{"tensor":{"dtype":"BF16","shape":[7,7],"data_offsets":[0,98]},'
+                '"tensor":{"dtype":"BF16","shape":[7,7],"data_offsets":[0,98]}}'
+            ).encode("utf-8")
+            path.write_bytes(struct.pack("<Q", len(header)) + header + bytes(98))
+
+            with assert_raises(SafetensorsError, "duplicate JSON key"):
                 read_header(path)
 
 

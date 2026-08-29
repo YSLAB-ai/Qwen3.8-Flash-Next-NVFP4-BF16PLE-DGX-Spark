@@ -13,6 +13,10 @@ class SafetensorsError(ValueError):
     """Raised when a safetensors header is malformed or unsafe to inspect."""
 
 
+class DuplicateJsonKeyError(ValueError):
+    """Raised when a JSON object repeats a key."""
+
+
 _MAX_HEADER_BYTES = 100_000_000
 
 
@@ -22,6 +26,20 @@ class TensorMeta:
     shape: tuple[int, ...]
     data_start: int
     data_end: int
+
+
+def strict_json_loads(document: str | bytes) -> Any:
+    """Decode JSON while rejecting duplicate keys at every object level."""
+    return json.loads(document, object_pairs_hook=_reject_duplicate_keys)
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateJsonKeyError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
 
 
 def read_header(path: Path) -> dict[str, TensorMeta]:
@@ -44,7 +62,9 @@ def read_header(path: Path) -> dict[str, TensorMeta]:
     if len(raw_header) != header_len:
         raise SafetensorsError(f"truncated header: {path}")
     try:
-        header = json.loads(raw_header)
+        header = strict_json_loads(raw_header)
+    except DuplicateJsonKeyError as exc:
+        raise SafetensorsError(str(exc)) from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SafetensorsError(f"invalid header JSON: {path}") from exc
     if not isinstance(header, dict):
