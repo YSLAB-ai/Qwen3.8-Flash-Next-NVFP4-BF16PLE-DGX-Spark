@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "targets": [
+    {
+      "name": "orca-uncensored",
+      "repo_id": "orcarouter/Qwen3.8-Flash-Next-Uncensored-NVFP4",
+      "revision": "3a3b63161c0745390e5270179af42e46efc70799",
+      "mode": "direct_bf16",
+      "served_model_name": "qwen3.8-flash-next",
+      "requires_auth": true,
+      "minimum_free_bytes": 107374182400,
+      "expected_ple": {
+        "tensor_count": 128,
+        "total_rows": 320001536,
+        "width": 160,
+        "dtype": "BF16",
+        "layer_id": 1,
+        "split_parts": 128
+      }
+    },
+    {
+      "name": "inferact",
+      "repo_id": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+      "revision": "103a7608316173ca6edd49929544244de7ffda70",
+      "mode": "direct_bf16",
+      "served_model_name": "qwen3.8-flash-next",
+      "requires_auth": false,
+      "minimum_free_bytes": 107374182400,
+      "expected_ple": {
+        "tensor_count": 128,
+        "total_rows": 320001536,
+        "width": 160,
+        "dtype": "BF16",
+        "layer_id": 1,
+        "split_parts": 128
+      }
+    },
+    {
+      "name": "radixark",
+      "repo_id": "RadixArk/Qwen3.8-Flash-Next-NVFP4",
+      "revision": "7b719225242aacd3dbd3f9407468c2ee9a9d2594",
+      "mode": "hybrid_bf16",
+      "served_model_name": "qwen3.8-flash-next",
+      "requires_auth": false,
+      "ple_source": {
+        "repo_id": "Qwen/Qwen3.8-Flash-Next",
+        "revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540"
+      },
+      "minimum_free_bytes": 107374182400,
+      "expected_ple": {
+        "tensor_count": 128,
+        "total_rows": 320001536,
+        "width": 160,
+        "dtype": "BF16",
+        "layer_id": 1,
+        "split_parts": 128
+      }
+    }
+  ]
+}
