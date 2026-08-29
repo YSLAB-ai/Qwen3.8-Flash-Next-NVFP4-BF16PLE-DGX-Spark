@@ -11,7 +11,7 @@ from typing import Any
 
 _SCHEMA_VERSION = 1
 _REVISION = re.compile(r"[0-9a-f]{40}")
-_MODES = {"direct_bf16", "hybrid_bf16"}
+_MODES = {"direct_bf16", "hybrid_bf16", "mtp_overlay"}
 _TARGET_FIELDS = {
     "name",
     "repo_id",
@@ -20,6 +20,7 @@ _TARGET_FIELDS = {
     "served_model_name",
     "requires_auth",
     "ple_source",
+    "mtp_source",
     "minimum_free_bytes",
     "expected_ple",
 }
@@ -32,6 +33,9 @@ _PLE_FIELDS = {
     "split_parts",
 }
 _MODEL_REF_FIELDS = {"repo_id", "revision"}
+_MTP_SOURCE_FIELDS = {"repo_id", "revision", "tensor_count", "dtype", "shards"}
+_MTP_SHARD_FIELDS = {"filename", "size", "sha256"}
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 class ManifestError(ValueError):
@@ -55,6 +59,22 @@ class PleExpectation:
 
 
 @dataclass(frozen=True)
+class MtpShard:
+    filename: str
+    size: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class MtpSource:
+    repo_id: str
+    revision: str
+    tensor_count: int
+    dtype: str
+    shards: tuple[MtpShard, ...]
+
+
+@dataclass(frozen=True)
 class Target:
     name: str
     repo_id: str
@@ -65,6 +85,7 @@ class Target:
     ple_source: ModelRef | None
     minimum_free_bytes: int
     expected_ple: PleExpectation
+    mtp_source: MtpSource | None = None
 
 
 @dataclass(frozen=True)
@@ -109,7 +130,7 @@ def load_manifest(path: Path) -> Manifest:
 
 def _parse_target(value: Any) -> Target:
     _require_object(value, "target")
-    _require_fields(value, _TARGET_FIELDS - {"ple_source"}, "target")
+    _require_fields(value, _TARGET_FIELDS - {"ple_source", "mtp_source"}, "target")
     _reject_unknown_fields(value, _TARGET_FIELDS, "target")
 
     mode = _require_string(value["mode"], "target.mode")
@@ -118,8 +139,13 @@ def _parse_target(value: Any) -> Target:
     ple_source_value = value.get("ple_source")
     if mode == "hybrid_bf16" and ple_source_value is None:
         raise ManifestError("hybrid_bf16 target requires ple_source")
-    if mode == "direct_bf16" and ple_source_value is not None:
-        raise ManifestError("direct_bf16 target must not define ple_source")
+    if mode != "hybrid_bf16" and ple_source_value is not None:
+        raise ManifestError(f"{mode} target must not define ple_source")
+    mtp_source_value = value.get("mtp_source")
+    if mode == "mtp_overlay" and mtp_source_value is None:
+        raise ManifestError("mtp_overlay target requires mtp_source")
+    if mode != "mtp_overlay" and mtp_source_value is not None:
+        raise ManifestError(f"{mode} target must not define mtp_source")
 
     return Target(
         name=_require_string(value["name"], "target.name"),
@@ -131,6 +157,7 @@ def _parse_target(value: Any) -> Target:
         ple_source=_parse_model_ref(ple_source_value) if ple_source_value is not None else None,
         minimum_free_bytes=_require_positive_int(value["minimum_free_bytes"], "target.minimum_free_bytes"),
         expected_ple=_parse_ple_expectation(value["expected_ple"]),
+        mtp_source=_parse_mtp_source(mtp_source_value) if mtp_source_value is not None else None,
     )
 
 
@@ -153,6 +180,45 @@ def _parse_ple_expectation(value: Any) -> PleExpectation:
         dtype=_require_string(value["dtype"], "expected_ple.dtype"),
         layer_id=_require_positive_int(value["layer_id"], "expected_ple.layer_id"),
         split_parts=_require_positive_int(value["split_parts"], "expected_ple.split_parts"),
+    )
+
+
+def _parse_mtp_source(value: Any) -> MtpSource:
+    _require_object(value, "mtp_source")
+    _require_exact_fields(value, _MTP_SOURCE_FIELDS, "mtp_source")
+    shards_value = value["shards"]
+    if not isinstance(shards_value, list) or not shards_value:
+        raise ManifestError("mtp_source.shards must be a non-empty list")
+    shards = tuple(_parse_mtp_shard(shard) for shard in shards_value)
+    filenames = [shard.filename for shard in shards]
+    if len(filenames) != len(set(filenames)):
+        raise ManifestError("mtp_source.shards contains duplicate filenames")
+    dtype = _require_string(value["dtype"], "mtp_source.dtype")
+    if dtype != "BF16":
+        raise ManifestError("mtp_source.dtype must be BF16")
+    return MtpSource(
+        repo_id=_require_string(value["repo_id"], "mtp_source.repo_id"),
+        revision=_parse_revision(value["revision"], "mtp_source.revision"),
+        tensor_count=_require_positive_int(value["tensor_count"], "mtp_source.tensor_count"),
+        dtype=dtype,
+        shards=shards,
+    )
+
+
+def _parse_mtp_shard(value: Any) -> MtpShard:
+    _require_object(value, "mtp_source shard")
+    _require_exact_fields(value, _MTP_SHARD_FIELDS, "mtp_source shard")
+    filename = _require_string(value["filename"], "mtp_source shard.filename")
+    path = Path(filename)
+    if path.name != filename or filename in {".", ".."} or path.suffix != ".safetensors":
+        raise ManifestError("mtp_source shard.filename must be one safetensors filename")
+    sha256 = _require_string(value["sha256"], "mtp_source shard.sha256")
+    if not _SHA256.fullmatch(sha256):
+        raise ManifestError("mtp_source shard.sha256 must be 64 lowercase hexadecimal characters")
+    return MtpShard(
+        filename=filename,
+        size=_require_positive_int(value["size"], "mtp_source shard.size"),
+        sha256=sha256,
     )
 
 

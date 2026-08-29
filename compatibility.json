@@ -19,6 +19,46 @@
       }
     },
     {
+      "name": "orca-uncensored-bf16-mtp",
+      "repo_id": "orcarouter/Qwen3.8-Flash-Next-Uncensored-NVFP4",
+      "revision": "3a3b63161c0745390e5270179af42e46efc70799",
+      "mode": "mtp_overlay",
+      "served_model_name": "qwen3.8-flash-next",
+      "requires_auth": true,
+      "minimum_free_bytes": 107374182400,
+      "mtp_source": {
+        "repo_id": "RadixArk/Qwen3.8-Flash-Next-NVFP4",
+        "revision": "7b719225242aacd3dbd3f9407468c2ee9a9d2594",
+        "tensor_count": 31,
+        "dtype": "BF16",
+        "shards": [
+          {
+            "filename": "model-bf16-00010.safetensors",
+            "size": 323564201,
+            "sha256": "0c2c3ef0030f5134edca0f3bbffc111cfa5da4b39b839cb8248ec762009be0aa"
+          },
+          {
+            "filename": "model-bf16-00011.safetensors",
+            "size": 10727387912,
+            "sha256": "d18b0db2e27fa066b3f8f86913686f572ee29406d971c8f5b0ec2902e3419ad9"
+          },
+          {
+            "filename": "model-bf16-00012.safetensors",
+            "size": 3683689888,
+            "sha256": "6c7c599218f8be53472c7b9ab0a9683b753cc187c5b7a49223e22348470b80e2"
+          }
+        ]
+      },
+      "expected_ple": {
+        "tensor_count": 128,
+        "total_rows": 320001536,
+        "width": 160,
+        "dtype": "BF16",
+        "layer_id": 1,
+        "split_parts": 128
+      }
+    },
+    {
       "name": "inferact",
       "repo_id": "Inferact/Qwen3.8-Flash-Next-NVFP4",
       "revision": "103a7608316173ca6edd49929544244de7ffda70",
