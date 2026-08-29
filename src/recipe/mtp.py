@@ -67,6 +67,11 @@ MTP_QUANTIZATION_IGNORE = (
     "mtp.fc_embedding",
     "mtp.fc_hidden",
     "mtp.layers.0.mlp.experts",
+    # CompressedTensorsMoEMethod probes these synthetic expert-0 projection
+    # paths to select the fused RoutedExperts quantization method.
+    "mtp.layers.0.mlp.experts.0.gate_proj",
+    "mtp.layers.0.mlp.experts.0.up_proj",
+    "mtp.layers.0.mlp.experts.0.down_proj",
     "mtp.layers.0.mlp.gate",
     "mtp.layers.0.mlp.shared_expert.down_proj",
     "mtp.layers.0.mlp.shared_expert.gate_proj",
@@ -100,7 +105,7 @@ _SERVING_METADATA_FILES = {
     "vocab.json",
 }
 _MAX_METADATA_BYTES = 32 * 1024 * 1024
-_LAYOUT_VERSION = "bf16-mtp-v2"
+_LAYOUT_VERSION = "bf16-mtp-v3"
 
 
 def mtp_overlay_fingerprint(target: Target) -> str:

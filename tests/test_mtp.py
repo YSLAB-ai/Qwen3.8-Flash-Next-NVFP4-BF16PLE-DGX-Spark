@@ -62,6 +62,13 @@ class MtpOverlayTests(unittest.TestCase):
                 "mtp.layers.0.mlp.experts",
                 output_config["quantization_config"]["ignore"],
             )
+            # vLLM's compressed-tensors MoE selector probes synthetic expert-0
+            # projection paths rather than the RoutedExperts module prefix.
+            for projection in ("gate_proj", "up_proj", "down_proj"):
+                self.assertIn(
+                    f"mtp.layers.0.mlp.experts.0.{projection}",
+                    output_config["quantization_config"]["ignore"],
+                )
             source_config["quantization_config"].pop("ignore")
             output_config["quantization_config"].pop("ignore")
             self.assertEqual(output_config, source_config)
