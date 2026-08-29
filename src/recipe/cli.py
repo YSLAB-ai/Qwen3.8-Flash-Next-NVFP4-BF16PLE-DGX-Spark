@@ -26,6 +26,7 @@ _VALIDATION_STATES = {
     "orca-uncensored": "runtime-validated",
     "inferact": "structure-audited",
     "radixark": "hybrid PLE preparation",
+    "orca-uncensored-bf16-mtp": "experimental BF16 MTP overlay",
 }
 
 
@@ -60,7 +61,12 @@ def main(
         return 0
     if args.command == "prepare":
         model_path = download_target(target, cache, args.image)
-        audit_checkpoint(model_path, target, (cache,))
+        approved_roots = (
+            (cache, cache.parent / "recipe-views")
+            if target.mode in {"hybrid_bf16", "mtp_overlay"}
+            else (cache,)
+        )
+        audit_checkpoint(model_path, target, approved_roots)
         print(model_path)
         return 0
     if args.command == "audit":
@@ -75,6 +81,7 @@ def main(
             gpu_memory=args.gpu_memory,
             port=args.port,
             bind=args.bind,
+            mtp=args.mtp,
         )
         model_path = local_target_path(target, cache)
         command = build_docker_command(
@@ -93,6 +100,7 @@ def main(
             args.unsafe_override,
             minimum_free_bytes=target.minimum_free_bytes,
             disk_path=cache,
+            allow_mtp=target.mode == "mtp_overlay",
         )
         approved_roots = (cache, cache.parent / "recipe-views")
         audit_checkpoint(model_path, target, approved_roots)
@@ -127,6 +135,7 @@ def _build_parser() -> argparse.ArgumentParser:
     runtime_options.add_argument("--gpu-memory", type=float, default=0.80)
     runtime_options.add_argument("--port", type=int, default=18_300)
     runtime_options.add_argument("--bind", default="127.0.0.1")
+    runtime_options.add_argument("--mtp", type=int, default=0)
     runtime_options.add_argument("--unsafe-override", action="store_true")
     for command, help_text in (
         ("serve", "audit and serve a pinned local checkpoint"),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .manifest import Target
+from .mtp import MTP_TENSOR_NAMES
 from .safetensors import (
     DuplicateJsonKeyError,
     SafetensorsError,
@@ -121,6 +123,8 @@ def audit_checkpoint(
 
     ple_entries = [mapped[name] for name in sorted(expected_names)]
     _validate_ple_entries(ple_entries, target)
+    if target.mode == "mtp_overlay":
+        _validate_mtp_overlay(model_dir, target, weight_map, mapped)
 
     resolved_files = tuple(sorted(headers))
     ple_files = tuple(sorted({path for path, _meta in ple_entries}))
@@ -147,10 +151,10 @@ def _resolve_model_dir(model_dir: Path) -> Path:
 
 def _validate_identity(model_dir: Path, target: Target) -> None:
     metadata_path = model_dir / "recipe-metadata.json"
-    if target.mode == "hybrid_bf16":
+    if target.mode in {"hybrid_bf16", "mtp_overlay"}:
         if not metadata_path.is_file():
-            raise AuditError("hybrid checkpoint requires recipe metadata identity")
-        _validate_hybrid_metadata(metadata_path, target)
+            raise AuditError(f"{target.mode} checkpoint requires recipe metadata identity")
+        _validate_recipe_metadata(metadata_path, target)
         return
 
     expected_cache_dir = "models--" + target.repo_id.replace("/", "--")
@@ -164,7 +168,7 @@ def _validate_identity(model_dir: Path, target: Target) -> None:
         )
 
 
-def _validate_hybrid_metadata(metadata_path: Path, target: Target) -> None:
+def _validate_recipe_metadata(metadata_path: Path, target: Target) -> None:
     metadata = _load_json_object(metadata_path, "recipe metadata")
     target_metadata = metadata.get("target")
     if not _matches_model_ref(target_metadata, target.repo_id, target.revision):
@@ -174,6 +178,12 @@ def _validate_hybrid_metadata(metadata_path: Path, target: Target) -> None:
             metadata.get("ple_source"), target.ple_source.repo_id, target.ple_source.revision
         ):
             raise AuditError("recipe metadata PLE source identity does not match manifest target")
+    if target.mode == "mtp_overlay":
+        source = target.mtp_source
+        if source is None or not _matches_model_ref(
+            metadata.get("mtp_source"), source.repo_id, source.revision
+        ):
+            raise AuditError("recipe metadata MTP source identity does not match manifest target")
 
 
 def _matches_model_ref(value: Any, repo_id: str, revision: str) -> bool:
@@ -333,6 +343,101 @@ def _validate_weight_scale(meta: TensorMeta) -> None:
     if element_count != 1:
         raise AuditError("weight_scale must contain exactly one value")
     _validate_tensor_byte_size(meta, "weight_scale")
+
+
+def _validate_mtp_overlay(
+    model_dir: Path,
+    target: Target,
+    weight_map: dict[str, str],
+    mapped: dict[str, tuple[Path, TensorMeta]],
+) -> None:
+    source = target.mtp_source
+    if source is None:
+        raise AuditError("MTP overlay target has no source manifest")
+    found = {name for name in weight_map if name.startswith("mtp.")}
+    expected = set(MTP_TENSOR_NAMES)
+    if found != expected or source.tensor_count != len(expected):
+        raise AuditError("MTP tensor names do not match the canonical 31-tensor set")
+    mtp_paths: set[Path] = set()
+    tensor_metadata: dict[str, dict[str, object]] = {}
+    for name in MTP_TENSOR_NAMES:
+        path, meta = mapped[name]
+        mtp_paths.add(path)
+        if meta.dtype != source.dtype:
+            raise AuditError(f"MTP tensor dtype does not match {source.dtype}: {name}")
+        _validate_tensor_byte_size(meta, "MTP tensor")
+        tensor_metadata[name] = {
+            "dtype": meta.dtype,
+            "shape": list(meta.shape),
+            "bytes": meta.data_end - meta.data_start,
+            "source_file": None,
+        }
+    if len(mtp_paths) != 1:
+        raise AuditError("MTP tensors must occupy one compact overlay shard")
+
+    metadata = _load_json_object(model_dir / "recipe-metadata.json", "recipe metadata")
+    if metadata.get("schema_version") != 1:
+        raise AuditError("MTP recipe metadata schema is invalid")
+    if metadata.get("mtp_tensor_names") != list(MTP_TENSOR_NAMES):
+        raise AuditError("MTP recipe metadata tensor names do not match")
+    recorded_tensors = metadata.get("mtp_tensors")
+    if not isinstance(recorded_tensors, dict) or set(recorded_tensors) != expected:
+        raise AuditError("MTP recipe tensor metadata is incomplete")
+    for name, expected_meta in tensor_metadata.items():
+        recorded = recorded_tensors[name]
+        if not isinstance(recorded, dict):
+            raise AuditError(f"MTP recipe tensor metadata is invalid: {name}")
+        for field in ("dtype", "shape", "bytes"):
+            if recorded.get(field) != expected_meta[field]:
+                raise AuditError(f"MTP recipe tensor metadata disagrees with shard: {name}")
+        if recorded.get("source_file") not in {shard.filename for shard in source.shards}:
+            raise AuditError(f"MTP recipe tensor source file is not approved: {name}")
+
+    expected_shards = [
+        {"filename": shard.filename, "size": shard.size, "sha256": shard.sha256}
+        for shard in sorted(source.shards, key=lambda item: item.filename)
+    ]
+    if metadata.get("source_shards") != expected_shards:
+        raise AuditError("MTP recipe source shard identities do not match manifest")
+    compact = metadata.get("compact_shard")
+    if not isinstance(compact, dict) or set(compact) != {"filename", "size", "sha256"}:
+        raise AuditError("MTP compact shard metadata is invalid")
+    filename = compact.get("filename")
+    if not isinstance(filename, str) or weight_map[MTP_TENSOR_NAMES[0]] != filename:
+        raise AuditError("MTP compact shard filename does not match index")
+    compact_path = (model_dir / filename).resolve(strict=True)
+    if mtp_paths != {compact_path}:
+        raise AuditError("MTP compact shard path does not match index")
+    if compact_path.stat().st_size != compact.get("size"):
+        raise AuditError("MTP compact shard size does not match metadata")
+    if _sha256(compact_path) != compact.get("sha256"):
+        raise AuditError("MTP compact shard SHA-256 does not match metadata")
+    if _sha256(model_dir / "model.safetensors.index.json") != metadata.get("index_sha256"):
+        raise AuditError("MTP overlay index SHA-256 does not match metadata")
+    if _sha256(model_dir / "config.json") != metadata.get("config_sha256"):
+        raise AuditError("MTP overlay config SHA-256 does not match metadata")
+
+    config = _load_json_object(model_dir / "config.json", "config")
+    quantization = config.get("quantization_config")
+    ignore = quantization.get("ignore") if isinstance(quantization, dict) else None
+    if (
+        not isinstance(ignore, list)
+        or ignore[-2:] != ["mtp.*", "model.mtp.*"]
+        or ignore.count("mtp.*") != 1
+        or ignore.count("model.mtp.*") != 1
+    ):
+        raise AuditError("MTP quantization ignore entries are missing or duplicated")
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise AuditError(f"unable to hash audited file: {path}") from exc
+    return digest.hexdigest()
 
 
 def _is_strict_positive_int(value: Any) -> bool:

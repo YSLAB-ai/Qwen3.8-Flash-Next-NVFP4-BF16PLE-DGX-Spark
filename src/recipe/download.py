@@ -12,6 +12,7 @@ from typing import Callable, Sequence
 
 from .hybrid import build_hybrid_view
 from .manifest import ModelRef, Target
+from .mtp import MTP_TENSOR_NAMES, build_mtp_overlay
 from .safetensors import DuplicateJsonKeyError, strict_json_loads
 
 
@@ -81,6 +82,22 @@ def download_target(
     target_snapshot = snapshot_path(cache, target_ref)
     if target.mode == "direct_bf16":
         return target_snapshot
+    if target.mode == "mtp_overlay" and target.mtp_source is not None:
+        source = target.mtp_source
+        source_ref = ModelRef(source.repo_id, source.revision)
+        runner(
+            build_hf_download_command(source_ref, (_SOURCE_INDEX,), cache, image),
+            check=True,
+        )
+        source_snapshot = snapshot_path(cache, source_ref)
+        filenames = _source_mtp_filenames(source_snapshot, target)
+        runner(build_hf_download_command(source_ref, filenames, cache, image), check=True)
+        return build_mtp_overlay(
+            target_snapshot,
+            source_snapshot,
+            cache.parent / "recipe-views",
+            target,
+        )
     if target.mode != "hybrid_bf16" or target.ple_source is None:
         raise DownloadError(f"unsupported target mode: {target.mode}")
 
@@ -101,6 +118,13 @@ def local_target_path(target: Target, cache: Path) -> Path:
         identity = (
             f"{target.repo_id}@{target.revision}:"
             f"{target.ple_source.repo_id}@{target.ple_source.revision}"
+        )
+        fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+        return cache.parent / "recipe-views" / target.name / fingerprint
+    if target.mode == "mtp_overlay" and target.mtp_source is not None:
+        identity = (
+            f"{target.repo_id}@{target.revision}:"
+            f"{target.mtp_source.repo_id}@{target.mtp_source.revision}:bf16-mtp"
         )
         fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
         return cache.parent / "recipe-views" / target.name / fingerprint
@@ -170,6 +194,40 @@ def _source_ple_filenames(source_snapshot: Path, target: Target) -> tuple[str, .
     _validate_filenames(filenames)
     if not all(filename.endswith(".safetensors") for filename in filenames):
         raise DownloadError("official PLE index references a non-safetensors shard")
+    return filenames
+
+
+def _source_mtp_filenames(source_snapshot: Path, target: Target) -> tuple[str, ...]:
+    source = target.mtp_source
+    if target.mode != "mtp_overlay" or source is None:
+        raise DownloadError("MTP filenames require an mtp_overlay target")
+    try:
+        index = strict_json_loads(
+            (source_snapshot / _SOURCE_INDEX).read_text(encoding="utf-8")
+        )
+        weight_map = index["weight_map"]
+    except (
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        DuplicateJsonKeyError,
+        KeyError,
+        TypeError,
+    ) as exc:
+        raise DownloadError("unable to read the pinned MTP safetensors index") from exc
+    if not isinstance(weight_map, dict) or not all(
+        isinstance(name, str) and isinstance(filename, str)
+        for name, filename in weight_map.items()
+    ):
+        raise DownloadError("MTP safetensors index has an invalid weight map")
+    found = {name for name in weight_map if name.startswith("mtp.")}
+    if found != set(MTP_TENSOR_NAMES) or source.tensor_count != len(MTP_TENSOR_NAMES):
+        raise DownloadError("MTP index does not contain the canonical 31 tensor names")
+    filenames = tuple(sorted({weight_map[name] for name in MTP_TENSOR_NAMES}))
+    expected = tuple(sorted(shard.filename for shard in source.shards))
+    if filenames != expected:
+        raise DownloadError("MTP index does not reference exactly the pinned source shards")
+    _validate_filenames(filenames)
     return filenames
 
 

@@ -17,7 +17,8 @@ from recipe.download import (
     download_target,
     snapshot_path as downloaded_snapshot_path,
 )
-from recipe.manifest import ModelRef, PleExpectation, Target
+from recipe.manifest import ModelRef, MtpShard, MtpSource, PleExpectation, Target
+from recipe.mtp import MTP_TENSOR_NAMES
 
 
 def radixark_target() -> Target:
@@ -47,6 +48,31 @@ def direct_target() -> Target:
         ple_source=None,
         minimum_free_bytes=10**30,
         expected_ple=PleExpectation(1, 1, 1, "BF16", 1, 1),
+    )
+
+
+def mtp_target() -> Target:
+    return Target(
+        name="orca-bf16-mtp",
+        repo_id="example/orca",
+        revision="a" * 40,
+        mode="mtp_overlay",
+        served_model_name="qwen3.8-flash-next",
+        requires_auth=True,
+        ple_source=None,
+        minimum_free_bytes=1,
+        expected_ple=PleExpectation(1, 1, 1, "BF16", 1, 1),
+        mtp_source=MtpSource(
+            "example/radix",
+            "b" * 40,
+            31,
+            "BF16",
+            (
+                MtpShard("model-bf16-00010.safetensors", 10, "c" * 64),
+                MtpShard("model-bf16-00011.safetensors", 11, "d" * 64),
+                MtpShard("model-bf16-00012.safetensors", 12, "e" * 64),
+            ),
+        ),
     )
 
 
@@ -205,6 +231,55 @@ class DownloadTests(unittest.TestCase):
 
             with self.assertRaises(DownloadError):
                 download_target(target, cache, "qwen38-flash-dgx", runner=incomplete_index)
+
+    def test_mtp_download_fetches_only_pinned_index_and_three_source_shards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "hf-cache"
+            target = mtp_target()
+            calls: list[list[str]] = []
+
+            def runner(command: list[str], *, check: bool) -> None:
+                self.assertTrue(check)
+                calls.append(command)
+                if "model.safetensors.index.json" in command:
+                    source = target.mtp_source
+                    snapshot = downloaded_snapshot_path(
+                        cache, ModelRef(source.repo_id, source.revision)
+                    )
+                    snapshot.mkdir(parents=True)
+                    filenames = [shard.filename for shard in source.shards]
+                    weights = {
+                        name: filenames[index % len(filenames)]
+                        for index, name in enumerate(MTP_TENSOR_NAMES)
+                    }
+                    (snapshot / "model.safetensors.index.json").write_text(
+                        json.dumps({"weight_map": weights}), encoding="utf-8"
+                    )
+
+            expected = Path(directory) / "recipe-views" / target.name
+            with patch("recipe.download.build_mtp_overlay", return_value=expected) as build:
+                result = download_target(
+                    target, cache, "qwen38-flash-dgx", runner=runner
+                )
+
+        self.assertEqual(result, expected)
+        self.assertEqual(len(calls), 4)
+        rendered = [" ".join(call) for call in calls]
+        self.assertIn("config.json", rendered[0])
+        self.assertIn(target.repo_id, rendered[1])
+        self.assertIn("model.safetensors.index.json", rendered[2])
+        for shard in target.mtp_source.shards:
+            self.assertIn(shard.filename, rendered[3])
+        self.assertNotIn("config.json", rendered[3])
+        build.assert_called_once_with(
+            downloaded_snapshot_path(cache, ModelRef(target.repo_id, target.revision)),
+            downloaded_snapshot_path(
+                cache,
+                ModelRef(target.mtp_source.repo_id, target.mtp_source.revision),
+            ),
+            cache.parent / "recipe-views",
+            target,
+        )
 
     def test_direct_download_rejects_low_cache_space_before_downloader_starts(self):
         """The target disk gate must run before the first direct download command."""

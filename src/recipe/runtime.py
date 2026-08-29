@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -59,9 +60,10 @@ def validate_environment(
     *,
     minimum_free_bytes: int = 0,
     disk_path: Path | None = None,
+    allow_mtp: bool = False,
 ) -> EnvironmentReport:
     """Fail closed when host capacity or options are outside the safe profile."""
-    required_errors = _required_option_errors(options)
+    required_errors = _required_option_errors(options, allow_mtp=allow_mtp)
     if required_errors:
         raise RuntimeConfigurationError("; ".join(required_errors))
     mem_available = _mem_available_bytes()
@@ -90,7 +92,8 @@ def build_docker_command(
     unsafe_override: bool = False,
 ) -> list[str]:
     """Return a Docker argv list for a pinned local model, without executing it."""
-    required_errors = _required_option_errors(options)
+    allow_mtp = target.mode == "mtp_overlay"
+    required_errors = _required_option_errors(options, allow_mtp=allow_mtp)
     if required_errors:
         raise RuntimeConfigurationError("; ".join(required_errors))
     warnings = _profile_warnings(options)
@@ -107,6 +110,15 @@ def build_docker_command(
         model, cache, cache_in_container
     )
     container_name = container_name_for(target)
+    speculative_args: list[str] = []
+    if options.mtp > 0:
+        speculative_args = [
+            "--speculative-config",
+            json.dumps(
+                {"method": "mtp", "num_speculative_tokens": options.mtp},
+                separators=(",", ":"),
+            ),
+        ]
     return [
         "docker",
         "run",
@@ -171,6 +183,7 @@ def build_docker_command(
         "qwen3_coder",
         "--reasoning-parser",
         "qwen3",
+        *speculative_args,
     ]
 
 
@@ -232,10 +245,16 @@ def _profile_warnings(options: RuntimeOptions) -> list[str]:
     return warnings
 
 
-def _required_option_errors(options: RuntimeOptions) -> list[str]:
+def _required_option_errors(options: RuntimeOptions, *, allow_mtp: bool) -> list[str]:
     """Return options that cannot be enabled even under an unsafe override."""
     errors: list[str] = []
-    if options.mtp != 0:
+    if (
+        isinstance(options.mtp, bool)
+        or not isinstance(options.mtp, int)
+        or not 0 <= options.mtp <= 16
+    ):
+        errors.append("MTP depth must be an integer in the range 0..16")
+    elif options.mtp != 0 and not allow_mtp:
         errors.append(
             "MTP is unavailable because the pinned Orcarouter NVFP4 checkpoint has no MTP head tensors"
         )

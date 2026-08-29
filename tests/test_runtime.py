@@ -44,6 +44,18 @@ def hybrid_model_path(cache: Path) -> Path:
     return path
 
 
+def mtp_target():
+    return load_manifest(ROOT / "compatibility.json").target("orca-uncensored-bf16-mtp")
+
+
+def mtp_model_path(cache: Path) -> Path:
+    from recipe.download import local_target_path
+
+    path = local_target_path(mtp_target(), cache)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 class RuntimeTests(unittest.TestCase):
     def test_defaults_match_validated_profile(self):
         options = RuntimeOptions()
@@ -81,6 +93,45 @@ class RuntimeTests(unittest.TestCase):
                 build_docker_command(
                     orca_target(), model_path(cache), cache, RuntimeOptions(mtp=1)
                 )
+
+    def test_mtp_overlay_renders_unique_native_speculative_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "hf-cache"
+            command = build_docker_command(
+                mtp_target(),
+                mtp_model_path(cache),
+                cache,
+                RuntimeOptions(mtp=4),
+            )
+
+        joined = " ".join(command)
+        self.assertIn("--served-model-name qwen3.8-flash-next-orca-uncensored-bf16-mtp", joined)
+        self.assertIn('--speculative-config {"method":"mtp","num_speculative_tokens":4}', joined)
+        self.assertIn("--name qwen38-flash-orca-uncensored-bf16-mtp", joined)
+        self.assertEqual(command.count("--speculative-config"), 1)
+
+    def test_mtp_overlay_allows_explicit_zero_depth_baseline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "hf-cache"
+            command = build_docker_command(
+                mtp_target(), mtp_model_path(cache), cache, RuntimeOptions(mtp=0)
+            )
+
+        self.assertNotIn("--speculative-config", command)
+
+    def test_mtp_overlay_rejects_invalid_depths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "hf-cache"
+            for depth in (-1, 17, True):
+                with self.subTest(depth=depth), self.assertRaisesRegex(
+                    RuntimeConfigurationError, "MTP depth"
+                ):
+                    build_docker_command(
+                        mtp_target(),
+                        mtp_model_path(cache),
+                        cache,
+                        RuntimeOptions(mtp=depth),
+                    )
 
     def test_mtp_and_prewarm_are_rejected_even_with_unsafe_override(self):
         with tempfile.TemporaryDirectory() as directory:

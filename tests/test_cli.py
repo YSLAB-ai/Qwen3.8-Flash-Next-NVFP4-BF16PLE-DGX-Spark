@@ -31,6 +31,8 @@ class CliTests(unittest.TestCase):
         self.assertIn("structure-audited", text)
         self.assertIn("radixark", text)
         self.assertIn("hybrid", text)
+        self.assertIn("orca-uncensored-bf16-mtp", text)
+        self.assertIn("experimental", text)
 
     def test_path_prints_the_pinned_direct_snapshot_path(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -132,16 +134,39 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(runner.calls, [["docker", "container", "inspect", "qwen38-flash-orca-uncensored"]])
 
-    def test_runtime_cli_rejects_mtp_and_prewarm_flags(self):
-        for flag in ("--mtp", "--prewarm"):
-            with self.subTest(flag=flag), self.assertRaises(SystemExit) as exited, patch(
-                "sys.stderr", new=io.StringIO()
-            ), redirect_stdout(io.StringIO()):
-                arguments = ["dry-run", "orca-uncensored", "--unsafe-override", flag]
-                if flag == "--mtp":
-                    arguments.append("1")
-                main(arguments, manifest_path=ROOT / "compatibility.json")
-            self.assertEqual(exited.exception.code, 2)
+    def test_runtime_cli_rejects_mtp_on_original_target(self):
+        with self.assertRaisesRegex(ValueError, "MTP"), redirect_stdout(io.StringIO()):
+            main(
+                ["dry-run", "orca-uncensored", "--unsafe-override", "--mtp", "1"],
+                manifest_path=ROOT / "compatibility.json",
+            )
+
+    def test_runtime_cli_accepts_mtp_on_overlay_target(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = main(
+                [
+                    "dry-run",
+                    "orca-uncensored-bf16-mtp",
+                    "--unsafe-override",
+                    "--mtp",
+                    "3",
+                ],
+                manifest_path=ROOT / "compatibility.json",
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('num_speculative_tokens":3', output.getvalue())
+
+    def test_runtime_cli_still_rejects_unknown_prewarm_flag(self):
+        with self.assertRaises(SystemExit) as exited, patch(
+            "sys.stderr", new=io.StringIO()
+        ), redirect_stdout(io.StringIO()):
+            main(
+                ["dry-run", "orca-uncensored", "--unsafe-override", "--prewarm"],
+                manifest_path=ROOT / "compatibility.json",
+            )
+        self.assertEqual(exited.exception.code, 2)
 
 
 class _Result:
