@@ -3,3 +3,7 @@
 __pycache__/
 *.orig
 .worktrees/
+hf-cache/
+recipe-views/
+*.safetensors
+benchmarks/scratch/
