@@ -11,6 +11,11 @@
 # for reproducibility; bump the tag below if the upstream recipe moves.
 FROM vllm/vllm-openai:qwen38-flash-next@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8
 
+LABEL org.opencontainers.image.source="https://github.com/YSLAB-ai/Qwen3.8-Flash-Next-NVFP4-BF16PLE-DGX-Spark" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.base.digest="sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8" \
+      ai.yslab.vllm.version="0.1.dev20073+g8e685d198"
+
 # Package layout inside the official image (vLLM 0.1.dev20073, torch 2.13 cu130,
 # numpy 2.2.6 — the patch needs numpy, already present).
 ARG SP=/usr/local/lib/python3.12/dist-packages

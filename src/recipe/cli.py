@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import subprocess
 from typing import Iterable, Sequence
 
 from .audit import audit_checkpoint
 from .download import download_target, local_target_path, login
 from .manifest import ManifestError, Target, load_manifest
+from .runtime import (
+    RuntimeOptions,
+    build_docker_command,
+    served_model_alias,
+    start_container,
+    validate_environment,
+)
 
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -21,7 +29,12 @@ _VALIDATION_STATES = {
 }
 
 
-def main(argv: Sequence[str] | None = None, *, manifest_path: Path | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    manifest_path: Path | None = None,
+    runner: object = subprocess.run,
+) -> int:
     """Run the recipe CLI without exposing credentials in rendered commands."""
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -55,6 +68,34 @@ def main(argv: Sequence[str] | None = None, *, manifest_path: Path | None = None
         audit_checkpoint(model_path, target, (cache,))
         print(model_path)
         return 0
+    if args.command in {"serve", "dry-run"}:
+        options = RuntimeOptions(
+            context=args.context,
+            sequences=args.sequences,
+            gpu_memory=args.gpu_memory,
+            mtp=args.mtp,
+            prewarm=args.prewarm,
+            port=args.port,
+            bind=args.bind,
+        )
+        model_path = local_target_path(target, cache)
+        command = build_docker_command(
+            target, model_path, cache, options, unsafe_override=args.unsafe_override
+        )
+        if args.command == "dry-run":
+            print(" ".join(command))
+            return 0
+        validate_environment(
+            options,
+            args.unsafe_override,
+            minimum_free_bytes=target.minimum_free_bytes,
+            disk_path=cache,
+        )
+        approved_roots = (cache, cache.parent / "recipe-views")
+        audit_checkpoint(model_path, target, approved_roots)
+        start_container(command, target, replace=args.replace, runner=runner)
+        print(f"started {served_model_alias(target)} on {options.bind}:{options.port}")
+        return 0
     parser.error(f"unknown command: {args.command}")
     return 2
 
@@ -75,6 +116,24 @@ def _build_parser() -> argparse.ArgumentParser:
     ):
         child = commands.add_parser(command, parents=[options], help=help_text)
         child.add_argument("target", help="approved manifest target alias")
+    runtime_options = argparse.ArgumentParser(add_help=False)
+    runtime_options.add_argument("--cache", default=str(_DEFAULT_CACHE), help="local Hugging Face cache")
+    runtime_options.add_argument("--context", type=int, default=262_144)
+    runtime_options.add_argument("--sequences", type=int, default=8)
+    runtime_options.add_argument("--gpu-memory", type=float, default=0.80)
+    runtime_options.add_argument("--mtp", type=int, default=0)
+    runtime_options.add_argument("--prewarm", action="store_true")
+    runtime_options.add_argument("--port", type=int, default=18_300)
+    runtime_options.add_argument("--bind", default="127.0.0.1")
+    runtime_options.add_argument("--unsafe-override", action="store_true")
+    for command, help_text in (
+        ("serve", "audit and serve a pinned local checkpoint"),
+        ("dry-run", "render a guarded Docker command without executing it"),
+    ):
+        child = commands.add_parser(command, parents=[runtime_options], help=help_text)
+        child.add_argument("target", help="approved manifest target alias")
+        if command == "serve":
+            child.add_argument("--replace", action="store_true")
     return parser
 
 
