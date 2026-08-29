@@ -71,6 +71,28 @@ class CliTests(unittest.TestCase):
         self.assertIn("127.0.0.1:18300:8000", command)
         self.assertNotIn("HF_TOKEN", command)
 
+    def test_dry_run_uses_requested_image(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            try:
+                exit_code = main(
+                    [
+                        "dry-run",
+                        "orca-uncensored",
+                        "--unsafe-override",
+                        "--image",
+                        "yslab-qwen38-flash-next-bf16ple:0.1.0-rc1",
+                    ],
+                    manifest_path=ROOT / "compatibility.json",
+                )
+            except SystemExit as exc:
+                self.fail(f"dry-run rejected the requested image: {exc}")
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn(
+            "yslab-qwen38-flash-next-bf16ple:0.1.0-rc1", output.getvalue()
+        )
+
     def test_serve_refuses_existing_container_without_replace(self):
         runner = _FakeRunner(existing=True)
         with patch("recipe.cli.validate_environment"), patch("recipe.cli.audit_checkpoint"):

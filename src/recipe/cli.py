@@ -78,7 +78,12 @@ def main(
         )
         model_path = local_target_path(target, cache)
         command = build_docker_command(
-            target, model_path, cache, options, unsafe_override=args.unsafe_override
+            target,
+            model_path,
+            cache,
+            options,
+            image=args.image,
+            unsafe_override=args.unsafe_override,
         )
         if args.command == "dry-run":
             print(" ".join(command))
@@ -116,6 +121,7 @@ def _build_parser() -> argparse.ArgumentParser:
         child.add_argument("target", help="approved manifest target alias")
     runtime_options = argparse.ArgumentParser(add_help=False)
     runtime_options.add_argument("--cache", default=str(_DEFAULT_CACHE), help="local Hugging Face cache")
+    runtime_options.add_argument("--image", default=_DEFAULT_IMAGE, help="vLLM image to run")
     runtime_options.add_argument("--context", type=int, default=262_144)
     runtime_options.add_argument("--sequences", type=int, default=8)
     runtime_options.add_argument("--gpu-memory", type=float, default=0.80)

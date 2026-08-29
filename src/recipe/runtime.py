@@ -84,6 +84,7 @@ def build_docker_command(
     cache_root: Path,
     options: RuntimeOptions,
     *,
+    image: str = DEFAULT_IMAGE,
     unsafe_override: bool = False,
 ) -> list[str]:
     """Return a Docker argv list for a pinned local model, without executing it."""
@@ -135,7 +136,7 @@ def build_docker_command(
         "VLLM_PLE_MMAP_PREWARM=0",
         "-e",
         "VLLM_USE_FLASHINFER_SAMPLER=1",
-        DEFAULT_IMAGE,
+        image,
         str(model_in_container),
         "--served-model-name",
         served_model_alias(target),
