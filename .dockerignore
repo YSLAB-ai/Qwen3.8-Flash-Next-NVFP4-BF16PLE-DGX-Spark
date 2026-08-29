@@ -2,3 +2,13 @@ docs/
 scripts/
 *.md
 .git/
+.worktrees/
+hf-cache/
+recipe-views/
+*.bin
+*.ckpt
+*.gguf
+*.onnx
+*.pt
+*.pth
+*.safetensors
