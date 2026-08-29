@@ -30,14 +30,16 @@ COPY src/patch_qwen4_exp_config.py /tmp/patch_qwen4_exp_config.py
 COPY src/patch_qwen4_exp_quantized_lm_head.py /tmp/patch_qwen4_exp_quantized_lm_head.py
 COPY src/patch_parallel_lm_head_linear_attrs.py /tmp/patch_parallel_lm_head_linear_attrs.py
 COPY src/patch_qwen4_exp_mtp_load_guard.py /tmp/patch_qwen4_exp_mtp_load_guard.py
+COPY src/patch_qwen4_exp_mtp_compressed_ignore.py /tmp/patch_qwen4_exp_mtp_compressed_ignore.py
 
 # Append the hook to the model file. No-op unless VLLM_PLE_MMAP=1 at runtime, so
 # the image still behaves exactly like upstream when the flag is off.
 RUN python3 /tmp/patch_qwen4_exp_config.py ${QWEN_CONFIG} \
  && python3 /tmp/patch_qwen4_exp_quantized_lm_head.py ${QWEN_MODEL} ${QWEN_MTP} \
  && python3 /tmp/patch_parallel_lm_head_linear_attrs.py ${LM_HEAD} \
+ && python3 /tmp/patch_qwen4_exp_mtp_compressed_ignore.py ${QWEN_MTP} \
  && python3 /tmp/patch_qwen4_exp_mtp_load_guard.py ${QWEN_MTP} \
  && cp ${PLE} ${PLE}.orig \
  && printf '\n\n# --- qwen38-flash-dgx: serve the PLE n-gram table from disk (VLLM_PLE_MMAP=1) ---\nfrom vllm_ple_mmap import apply as _ple_mmap_apply\n_ple_mmap_apply(Qwen3_8FlashNextNGramEmbedding)\n' >> ${PLE} \
  && python3 -c "import ast; [ast.parse(open(path).read()) for path in ('${PLE}', '${QWEN_CONFIG}', '${QWEN_MODEL}', '${QWEN_MTP}', '${LM_HEAD}')]; print('vLLM sources patched OK')" \
- && rm /tmp/patch_qwen4_exp_config.py /tmp/patch_qwen4_exp_quantized_lm_head.py /tmp/patch_parallel_lm_head_linear_attrs.py /tmp/patch_qwen4_exp_mtp_load_guard.py
+ && rm /tmp/patch_qwen4_exp_config.py /tmp/patch_qwen4_exp_quantized_lm_head.py /tmp/patch_parallel_lm_head_linear_attrs.py /tmp/patch_qwen4_exp_mtp_compressed_ignore.py /tmp/patch_qwen4_exp_mtp_load_guard.py

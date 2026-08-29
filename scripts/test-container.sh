@@ -16,8 +16,10 @@ path = Path("/usr/local/lib/python3.12/dist-packages/vllm/models/qwen3_8_flash_n
 source = path.read_text(encoding="utf-8")
 marker = "qwen38-flash-dgx: require exact native BF16 MTP checkpoint tensors"
 assert marker in source, "native MTP load guard is absent"
+ignore_marker = "qwen38-flash-dgx: remap compressed-tensors MTP ignore paths"
+assert ignore_marker in source, "compressed-tensors MTP ignore remap is absent"
 ast.parse(source)
-print("native MTP load guard present and syntax valid")
+print("native MTP patches present and syntax valid")
 '
 exec docker run --rm --entrypoint python3 \
   -v "$repo_root/src:/test:ro" \
