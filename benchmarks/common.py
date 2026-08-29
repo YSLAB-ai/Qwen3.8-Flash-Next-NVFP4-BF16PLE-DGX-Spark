@@ -63,7 +63,7 @@ def read_json(url: str, timeout: float) -> dict[str, Any]:
 
 
 def stream_completion(base_url: str, payload: dict[str, object], timeout: float) -> dict[str, Any]:
-    """Measure TTFT and decode rate from the first and last emitted delta."""
+    """Measure reasoning-aware TTFT, decode, visible-content, and wall rates."""
     request = urllib.request.Request(
         endpoint(base_url, "chat/completions"),
         data=json.dumps(payload).encode("utf-8"),
@@ -78,6 +78,8 @@ def stream_completion(base_url: str, payload: dict[str, object], timeout: float)
 
     first_delta: float | None = None
     last_delta: float | None = None
+    first_visible_delta: float | None = None
+    last_visible_delta: float | None = None
     usage: dict[str, Any] | None = None
     content_parts: list[str] = []
     with response:
@@ -93,25 +95,50 @@ def stream_completion(base_url: str, payload: dict[str, object], timeout: float)
                 usage = event["usage"]
             for choice in event.get("choices") or []:
                 delta = choice.get("delta") or {}
+                reasoning = delta.get("reasoning_content")
                 text = delta.get("content")
-                if isinstance(text, str) and text:
-                    content_parts.append(text)
+                has_reasoning = isinstance(reasoning, str) and bool(reasoning)
+                has_content = isinstance(text, str) and bool(text)
+                if has_reasoning or has_content:
                     now = time.perf_counter()
                     first_delta = now if first_delta is None else first_delta
                     last_delta = now
+                if has_content:
+                    content_parts.append(text)
+                    first_visible_delta = (
+                        now if first_visible_delta is None else first_visible_delta
+                    )
+                    last_visible_delta = now
     finished = time.perf_counter()
     if usage is None or first_delta is None:
         raise RuntimeError("stream ended without usage or final output")
     decode_seconds = max((last_delta or finished) - first_delta, 1e-9)
     completion_tokens = int(usage["completion_tokens"])
+    details = usage.get("completion_tokens_details") or {}
+    reasoning_tokens = int(details.get("reasoning_tokens") or 0)
+    visible_tokens = max(completion_tokens - reasoning_tokens, 0)
+    visible_seconds = (
+        max((last_visible_delta or finished) - first_visible_delta, 1e-9)
+        if first_visible_delta is not None
+        else None
+    )
     return {
         "content": "".join(content_parts),
         "usage": usage,
         "ttft_seconds": first_delta - started,
+        "time_to_first_visible_content_seconds": (
+            first_visible_delta - started if first_visible_delta is not None else None
+        ),
         "total_seconds": finished - started,
         "decode_seconds": decode_seconds,
         "prefill_tokens_per_second": int(usage["prompt_tokens"]) / max(first_delta - started, 1e-9),
         "decode_tokens_per_second": max(completion_tokens - 1, 0) / decode_seconds,
+        "visible_content_tokens_per_second": (
+            max(visible_tokens - 1, 0) / visible_seconds
+            if visible_seconds is not None
+            else None
+        ),
+        "end_to_end_tokens_per_second": completion_tokens / max(finished - started, 1e-9),
     }
 
 

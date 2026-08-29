@@ -12,8 +12,58 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "benchmarks"))
 
 from functional import validate  # noqa: E402
+import common  # noqa: E402
 import long_context  # noqa: E402
 import stability  # noqa: E402
+
+
+class _StreamResponse:
+    def __init__(self, lines: list[bytes]):
+        self._lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def __iter__(self):
+        return iter(self._lines)
+
+
+class StreamCompletionMetricTests(unittest.TestCase):
+    def test_reasoning_and_visible_output_use_separate_token_clocks(self):
+        """Hidden tokens must never be divided by visible-content-only time."""
+        events = [
+            b'data: {"choices":[{"delta":{"reasoning_content":"think"}}]}\n',
+            b'data: {"choices":[{"delta":{"content":"A"}}]}\n',
+            b'data: {"choices":[{"delta":{"content":"B"}}]}\n',
+            (
+                b'data: {"choices":[],"usage":{"prompt_tokens":10,'
+                b'"completion_tokens":5,"completion_tokens_details":'
+                b'{"reasoning_tokens":2}}}\n'
+            ),
+            b'data: [DONE]\n',
+        ]
+        clock = [0.0, 1.0, 3.0, 4.0, 5.0]
+
+        with patch.object(
+            common.urllib.request,
+            "urlopen",
+            return_value=_StreamResponse(events),
+        ), patch.object(common.time, "perf_counter", side_effect=clock):
+            result = common.stream_completion(
+                "http://127.0.0.1:1/v1",
+                {"stream": True},
+                1.0,
+            )
+
+        self.assertEqual(result["content"], "AB")
+        self.assertEqual(result["ttft_seconds"], 1.0)
+        self.assertEqual(result["time_to_first_visible_content_seconds"], 3.0)
+        self.assertAlmostEqual(result["decode_tokens_per_second"], 4 / 3)
+        self.assertEqual(result["visible_content_tokens_per_second"], 2.0)
+        self.assertEqual(result["end_to_end_tokens_per_second"], 1.0)
 
 
 class FunctionalBenchmarkTests(unittest.TestCase):
