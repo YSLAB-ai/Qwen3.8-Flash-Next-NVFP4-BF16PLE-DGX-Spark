@@ -32,7 +32,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("radixark", text)
         self.assertIn("hybrid", text)
         self.assertIn("orca-uncensored-bf16-mtp", text)
-        self.assertIn("experimental", text)
+        self.assertIn("runtime-qualified BF16 MTP overlay", text)
 
     def test_path_prints_the_pinned_direct_snapshot_path(self):
         with tempfile.TemporaryDirectory() as directory:

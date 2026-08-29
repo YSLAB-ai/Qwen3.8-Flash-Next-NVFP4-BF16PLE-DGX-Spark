@@ -26,7 +26,7 @@ _VALIDATION_STATES = {
     "orca-uncensored": "runtime-validated",
     "inferact": "structure-audited",
     "radixark": "hybrid PLE preparation",
-    "orca-uncensored-bf16-mtp": "experimental BF16 MTP overlay",
+    "orca-uncensored-bf16-mtp": "runtime-qualified BF16 MTP overlay",
 }
 
 
