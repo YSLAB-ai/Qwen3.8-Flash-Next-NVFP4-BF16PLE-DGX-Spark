@@ -1,0 +1,3 @@
+Built on the original FP8 PLE mmap work by blazux.
+YSLAB-ai added BF16 PLE support, DGX Spark compatibility fixes,
+multi-checkpoint tooling, safeguards, and runtime qualification.

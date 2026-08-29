@@ -1,0 +1,45 @@
+# Troubleshooting
+
+## Gated checkpoint download fails
+
+Log in with a Hugging Face account that has accepted the selected checkpoint's access
+conditions:
+
+```bash
+huggingface-cli login
+```
+
+Then rerun the recipe's download command. Do not bypass the checkpoint selection or
+pinned revision checks.
+
+## The disk gate rejects the download
+
+The recipe requires at least 100 GiB free before it downloads a target. Free space on
+the storage used for the checkpoint, preferably NVMe, then rerun the command. The PLE
+is memory-mapped from that storage during serving.
+
+## CUDA graph capture errors around PLE lookup
+
+Use the recipe defaults. The lookup must be separated from captured graph segments,
+so the runtime uses PIECEWISE capture. Do not switch this recipe to a full capture
+mode for the mapped PLE path.
+
+## KV cache configuration fails
+
+Use the BF16 KV default. This model path requires BF16 KV, and an FP8 KV setting is
+not a supported substitute.
+
+## MTP appears enabled
+
+Set `MTP=0`. The pinned Orcarouter checkpoint has zero MTP tensors. MTP1 provenance
+showed 0/1,287 accepted only because an incomplete draft was constructed; it is
+unsupported, not a tuning result. Depths 2-4 were not run for this checkpoint.
+
+## Replacing a running recipe container
+
+The serve command unloads an existing recipe container before it starts a replacement.
+If a prior attempt ended unexpectedly, rerun the same guarded command rather than
+starting an additional container manually.
+
+For supported target layouts, see [Compatibility](COMPATIBILITY.md). Benchmark scope
+and limitations are in [Benchmarks](BENCHMARKS.md).
