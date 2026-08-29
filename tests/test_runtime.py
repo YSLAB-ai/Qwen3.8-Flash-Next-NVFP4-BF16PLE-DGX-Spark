@@ -119,6 +119,20 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertNotIn("--speculative-config", command)
 
+    def test_deep_mtp_uses_qsa_compatible_attention_block_alignment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "hf-cache"
+            shallow = build_docker_command(
+                mtp_target(), mtp_model_path(cache), cache, RuntimeOptions(mtp=4)
+            )
+            deep = build_docker_command(
+                mtp_target(), mtp_model_path(cache), cache, RuntimeOptions(mtp=5)
+            )
+
+        self.assertNotIn("--block-size", shallow)
+        index = deep.index("--block-size")
+        self.assertEqual(deep[index + 1], "48")
+
     def test_mtp_overlay_rejects_invalid_depths(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "hf-cache"

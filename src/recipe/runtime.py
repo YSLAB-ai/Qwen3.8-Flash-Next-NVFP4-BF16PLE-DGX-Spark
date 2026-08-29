@@ -18,6 +18,7 @@ RECIPE_LABEL = "qwen38-flash-next-bf16-ple"
 MIN_MEM_AVAILABLE_BYTES = 100 * 1024**3
 _CONTAINER_RECIPE_ROOT = Path("/recipe")
 _CONTAINER_VIEWS = _CONTAINER_RECIPE_ROOT / "recipe-views"
+_DEEP_MTP_BLOCK_SIZE = 48
 _SPLITTING_OPS = (
     '["vllm::unified_attention_with_output","vllm::unified_mla_attention_with_output",'
     '"vllm::mamba_mixer2","vllm::mamba_mixer","vllm::short_conv",'
@@ -119,6 +120,12 @@ def build_docker_command(
                 separators=(",", ":"),
             ),
         ]
+    # QSA's speculative ring has a 12-token capacity at deeper MTP depths.
+    # A 48-token kernel alignment is divisible by both that ring and the
+    # attention kernel's native 16-token alignment.
+    deep_mtp_args = (
+        ["--block-size", str(_DEEP_MTP_BLOCK_SIZE)] if options.mtp >= 5 else []
+    )
     return [
         "docker",
         "run",
@@ -183,6 +190,7 @@ def build_docker_command(
         "qwen3_coder",
         "--reasoning-parser",
         "qwen3",
+        *deep_mtp_args,
         *speculative_args,
     ]
 
