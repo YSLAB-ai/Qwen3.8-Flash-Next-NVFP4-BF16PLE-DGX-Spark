@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from recipe.audit import audit_checkpoint
+from recipe.download import local_target_path
 from recipe.manifest import MtpShard, MtpSource, PleExpectation, Target
 from recipe.mtp import (
     MTP_QUANTIZATION_IGNORE,
@@ -34,6 +35,7 @@ class MtpOverlayTests(unittest.TestCase):
             )
 
             self.assertEqual(repeated, view)
+            self.assertEqual(view, local_target_path(target, root / "cache"))
             index = load_json(view / "model.safetensors.index.json")["weight_map"]
             self.assertEqual(
                 {name for name in index if name.startswith("mtp.")},

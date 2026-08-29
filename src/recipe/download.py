@@ -12,7 +12,7 @@ from typing import Callable, Sequence
 
 from .hybrid import build_hybrid_view
 from .manifest import ModelRef, Target
-from .mtp import MTP_TENSOR_NAMES, build_mtp_overlay
+from .mtp import MTP_TENSOR_NAMES, build_mtp_overlay, mtp_overlay_fingerprint
 from .safetensors import DuplicateJsonKeyError, strict_json_loads
 
 
@@ -122,12 +122,12 @@ def local_target_path(target: Target, cache: Path) -> Path:
         fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
         return cache.parent / "recipe-views" / target.name / fingerprint
     if target.mode == "mtp_overlay" and target.mtp_source is not None:
-        identity = (
-            f"{target.repo_id}@{target.revision}:"
-            f"{target.mtp_source.repo_id}@{target.mtp_source.revision}:bf16-mtp"
+        return (
+            cache.parent
+            / "recipe-views"
+            / target.name
+            / mtp_overlay_fingerprint(target)
         )
-        fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
-        return cache.parent / "recipe-views" / target.name / fingerprint
     raise DownloadError(f"unsupported target mode: {target.mode}")
 
 

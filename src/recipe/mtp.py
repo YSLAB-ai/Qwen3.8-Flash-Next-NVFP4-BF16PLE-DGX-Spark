@@ -100,6 +100,19 @@ _SERVING_METADATA_FILES = {
     "vocab.json",
 }
 _MAX_METADATA_BYTES = 32 * 1024 * 1024
+_LAYOUT_VERSION = "bf16-mtp-v2"
+
+
+def mtp_overlay_fingerprint(target: Target) -> str:
+    """Return the single canonical identity for the current overlay layout."""
+    source = target.mtp_source
+    if target.mode != "mtp_overlay" or source is None:
+        raise MtpOverlayError("MTP overlay fingerprint requires an mtp_overlay target")
+    identity = (
+        f"{target.repo_id}@{target.revision}:"
+        f"{source.repo_id}@{source.revision}:{_LAYOUT_VERSION}"
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
 
 
 def build_mtp_overlay(
@@ -125,9 +138,7 @@ def build_mtp_overlay(
     _validate_source_shards(source_snapshot, target)
     _validate_weight_maps(target_index, source_index, target)
 
-    fingerprint = hashlib.sha256(
-        f"{target.repo_id}@{target.revision}:{source.repo_id}@{source.revision}:bf16-mtp-v2".encode()
-    ).hexdigest()[:16]
+    fingerprint = mtp_overlay_fingerprint(target)
     final = output_root / _safe_name(target.name) / fingerprint
     if _path_exists(final):
         _verify_existing(final, target, target_snapshot, output_root)
