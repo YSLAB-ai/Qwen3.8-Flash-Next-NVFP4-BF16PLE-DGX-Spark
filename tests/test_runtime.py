@@ -27,7 +27,17 @@ def orca_target():
 def model_path(cache: Path) -> Path:
     target = orca_target()
     path = snapshot_path(cache, ModelRef(target.repo_id, target.revision))
-    path.mkdir(parents=True)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def hybrid_model_path(cache: Path) -> Path:
+    target = load_manifest(ROOT / "compatibility.json").target("radixark")
+    # The hybrid view has the deterministic location returned by local_target_path.
+    from recipe.download import local_target_path
+
+    path = local_target_path(target, cache)
+    path.mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -64,10 +74,28 @@ class RuntimeTests(unittest.TestCase):
     def test_rejects_unvalidated_options_without_override(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)
-            with self.assertRaisesRegex(RuntimeConfigurationError, "validated"):
+            with self.assertRaisesRegex(RuntimeConfigurationError, "MTP"):
                 build_docker_command(
                     orca_target(), model_path(cache), cache, RuntimeOptions(mtp=1)
                 )
+
+    def test_mtp_and_prewarm_are_rejected_even_with_unsafe_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            for options, message in (
+                (RuntimeOptions(mtp=1), "MTP"),
+                (RuntimeOptions(prewarm=True), "prewarm"),
+            ):
+                with self.subTest(options=options), self.assertRaisesRegex(
+                    RuntimeConfigurationError, message
+                ):
+                    validate_environment(options, True)
+                with self.subTest(options=options), self.assertRaisesRegex(
+                    RuntimeConfigurationError, message
+                ):
+                    build_docker_command(
+                        orca_target(), model_path(cache), cache, options, unsafe_override=True
+                    )
 
     def test_rejects_non_loopback_bind_without_override(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -84,6 +112,17 @@ class RuntimeTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeConfigurationError, "remote"):
             build_docker_command(target, remote_model, remote_cache, RuntimeOptions())
+
+    def test_hybrid_mounts_only_the_recipe_views_subtree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "hf-cache"
+            target = load_manifest(ROOT / "compatibility.json").target("radixark")
+            command = build_docker_command(target, hybrid_model_path(cache), cache, RuntimeOptions())
+
+        joined = " ".join(command)
+        self.assertIn(f"-v {cache.parent / 'recipe-views'}:/recipe-views:ro", joined)
+        self.assertIn(" /recipe-views/radixark/", joined)
+        self.assertNotIn(f"-v {cache.parent}:/recipe:ro", joined)
 
     def test_environment_rejects_low_memory_and_target_disk_without_override(self):
         options = RuntimeOptions()
@@ -103,7 +142,7 @@ class RuntimeTests(unittest.TestCase):
         with patch("recipe.runtime._mem_available_bytes", return_value=1), patch(
             "recipe.runtime._disk_free_bytes", return_value=1
         ):
-            report = validate_environment(RuntimeOptions(mtp=1), True, minimum_free_bytes=2)
+            report = validate_environment(RuntimeOptions(context=131_072), True, minimum_free_bytes=2)
 
         self.assertEqual((report.mem_available_bytes, report.disk_free_bytes), (1, 1))
         self.assertGreaterEqual(len(report.warnings), 3)

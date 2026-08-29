@@ -59,6 +59,9 @@ def validate_environment(
     disk_path: Path | None = None,
 ) -> EnvironmentReport:
     """Fail closed when host capacity or options are outside the safe profile."""
+    required_errors = _required_option_errors(options)
+    if required_errors:
+        raise RuntimeConfigurationError("; ".join(required_errors))
     mem_available = _mem_available_bytes()
     disk_free = _disk_free_bytes(disk_path or Path.cwd())
     warnings = _profile_warnings(options)
@@ -84,6 +87,9 @@ def build_docker_command(
     unsafe_override: bool = False,
 ) -> list[str]:
     """Return a Docker argv list for a pinned local model, without executing it."""
+    required_errors = _required_option_errors(options)
+    if required_errors:
+        raise RuntimeConfigurationError("; ".join(required_errors))
     warnings = _profile_warnings(options)
     if warnings and not unsafe_override:
         raise RuntimeConfigurationError("; ".join(warnings))
@@ -213,15 +219,23 @@ def _profile_warnings(options: RuntimeOptions) -> list[str]:
     warnings: list[str] = []
     if options.context != 262_144 or options.sequences != 8 or options.gpu_memory != 0.80:
         warnings.append("runtime options are outside the validated profile")
-    if options.mtp != 0:
-        warnings.append("MTP must be 0 in the validated profile")
-    if options.prewarm:
-        warnings.append("PLE prewarm must be disabled in the validated profile")
     if options.bind != "127.0.0.1":
         warnings.append("bind must use loopback 127.0.0.1")
     if not isinstance(options.port, int) or isinstance(options.port, bool) or not 1 <= options.port <= 65_535:
         warnings.append("port must be an integer in the range 1..65535")
     return warnings
+
+
+def _required_option_errors(options: RuntimeOptions) -> list[str]:
+    """Return options that cannot be enabled even under an unsafe override."""
+    errors: list[str] = []
+    if options.mtp != 0:
+        errors.append(
+            "MTP is unavailable because the pinned Orcarouter NVFP4 checkpoint has no MTP head tensors"
+        )
+    if options.prewarm:
+        errors.append("PLE prewarm must remain disabled for the qualified runtime")
+    return errors
 
 
 def _require_local_path(value: Path, label: str) -> Path:
@@ -245,12 +259,12 @@ def _model_mounts(model: Path, cache: Path) -> tuple[Path, tuple[str, ...]]:
     try:
         return Path("/hf") / model.relative_to(cache), ()
     except ValueError:
-        recipe_root = cache.parent.resolve(strict=False)
+        recipe_views = (cache.parent / "recipe-views").resolve(strict=False)
         try:
-            relative = model.relative_to(recipe_root)
+            relative = model.relative_to(recipe_views)
         except ValueError as exc:
             raise RuntimeConfigurationError("model path is outside the approved local cache") from exc
-        return Path("/recipe") / relative, ("-v", f"{recipe_root}:/recipe:ro")
+        return Path("/recipe-views") / relative, ("-v", f"{recipe_views}:/recipe-views:ro")
 
 
 def _mem_available_bytes() -> int:

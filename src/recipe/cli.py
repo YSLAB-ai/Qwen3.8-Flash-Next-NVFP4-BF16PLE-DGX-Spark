@@ -73,8 +73,6 @@ def main(
             context=args.context,
             sequences=args.sequences,
             gpu_memory=args.gpu_memory,
-            mtp=args.mtp,
-            prewarm=args.prewarm,
             port=args.port,
             bind=args.bind,
         )
@@ -121,8 +119,6 @@ def _build_parser() -> argparse.ArgumentParser:
     runtime_options.add_argument("--context", type=int, default=262_144)
     runtime_options.add_argument("--sequences", type=int, default=8)
     runtime_options.add_argument("--gpu-memory", type=float, default=0.80)
-    runtime_options.add_argument("--mtp", type=int, default=0)
-    runtime_options.add_argument("--prewarm", action="store_true")
     runtime_options.add_argument("--port", type=int, default=18_300)
     runtime_options.add_argument("--bind", default="127.0.0.1")
     runtime_options.add_argument("--unsafe-override", action="store_true")

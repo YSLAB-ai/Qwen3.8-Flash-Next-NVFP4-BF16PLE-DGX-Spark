@@ -83,6 +83,17 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(runner.calls, [["docker", "container", "inspect", "qwen38-flash-orca-uncensored"]])
 
+    def test_runtime_cli_rejects_mtp_and_prewarm_flags(self):
+        for flag in ("--mtp", "--prewarm"):
+            with self.subTest(flag=flag), self.assertRaises(SystemExit) as exited, patch(
+                "sys.stderr", new=io.StringIO()
+            ), redirect_stdout(io.StringIO()):
+                arguments = ["dry-run", "orca-uncensored", "--unsafe-override", flag]
+                if flag == "--mtp":
+                    arguments.append("1")
+                main(arguments, manifest_path=ROOT / "compatibility.json")
+            self.assertEqual(exited.exception.code, 2)
+
 
 class _Result:
     def __init__(self, returncode: int, stdout: str = ""):
