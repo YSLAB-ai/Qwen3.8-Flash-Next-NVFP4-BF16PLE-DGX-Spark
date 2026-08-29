@@ -13,6 +13,9 @@ class SafetensorsError(ValueError):
     """Raised when a safetensors header is malformed or unsafe to inspect."""
 
 
+_MAX_HEADER_BYTES = 100_000_000
+
+
 @dataclass(frozen=True)
 class TensorMeta:
     dtype: str
@@ -30,6 +33,8 @@ def read_header(path: Path) -> dict[str, TensorMeta]:
             if len(raw) != 8:
                 raise SafetensorsError(f"truncated header length: {path}")
             (header_len,) = struct.unpack("<Q", raw)
+            if header_len > _MAX_HEADER_BYTES:
+                raise SafetensorsError(f"header exceeds 100 MiB: {path}")
             if header_len > file_size - 8:
                 raise SafetensorsError(f"truncated header: {path}")
             raw_header = handle.read(header_len)
@@ -47,6 +52,7 @@ def read_header(path: Path) -> dict[str, TensorMeta]:
 
     base = 8 + header_len
     tensors: dict[str, TensorMeta] = {}
+    ranges: list[tuple[int, int, str]] = []
     for name, raw_meta in header.items():
         if name == "__metadata__":
             continue
@@ -78,4 +84,12 @@ def read_header(path: Path) -> dict[str, TensorMeta]:
         if data_end > file_size:
             raise SafetensorsError(f"tensor data exceeds file size: {path}: {name}")
         tensors[name] = TensorMeta(dtype, tuple(shape), data_start, data_end)
+        ranges.append((data_start, data_end, name))
+    expected_start = base
+    for data_start, data_end, name in sorted(ranges):
+        if data_start != expected_start:
+            raise SafetensorsError(f"tensor data ranges must be contiguous: {path}: {name}")
+        expected_start = data_end
+    if expected_start != file_size:
+        raise SafetensorsError(f"tensor data does not occupy the full data buffer: {path}")
     return tensors

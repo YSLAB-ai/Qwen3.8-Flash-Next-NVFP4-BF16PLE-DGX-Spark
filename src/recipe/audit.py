@@ -69,6 +69,10 @@ def audit_checkpoint(
             raise AuditError(
                 f"index/header disagreement: {name} is absent from {filename}"
             ) from exc
+    for path, header in headers.items():
+        indexed_names = {name for name, (mapped_path, _meta) in mapped.items() if mapped_path == path}
+        if set(header) != indexed_names:
+            raise AuditError(f"index/header disagreement for shard: {path.name}")
 
     expected_names = _expected_ple_names(target)
     prefix = _ple_prefix(target)
@@ -137,7 +141,9 @@ def _resolve_model_dir(model_dir: Path) -> Path:
 
 def _validate_identity(model_dir: Path, target: Target) -> None:
     metadata_path = model_dir / "recipe-metadata.json"
-    if metadata_path.exists():
+    if target.mode == "hybrid_bf16":
+        if not metadata_path.is_file():
+            raise AuditError("hybrid checkpoint requires recipe metadata identity")
         _validate_hybrid_metadata(metadata_path, target)
         return
 

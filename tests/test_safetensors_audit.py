@@ -118,12 +118,65 @@ class SafetensorsAuditTests(unittest.TestCase):
             with assert_raises(AuditError, "snapshot revision"):
                 audit_checkpoint(moved, target, (root,))
 
+    def test_audit_does_not_accept_direct_metadata_as_snapshot_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tmp_path = Path(directory)
+            target, model_dir, _root = make_checkpoint(tmp_path)
+            arbitrary = tmp_path / "arbitrary" / "not-a-snapshot"
+            arbitrary.parent.mkdir()
+            model_dir.rename(arbitrary)
+            (arbitrary / "recipe-metadata.json").write_text(
+                json.dumps(
+                    {"target": {"repo_id": target.repo_id, "revision": target.revision}}
+                ),
+                encoding="utf-8",
+            )
+
+            with assert_raises(AuditError, "snapshot revision"):
+                audit_checkpoint(arbitrary, target, (tmp_path,))
+
+    def test_audit_rejects_unindexed_header_tensor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target, model_dir, root = make_checkpoint(Path(directory))
+            write_safetensors(
+                model_dir / "model-00001-of-00004.safetensors",
+                {
+                    f"{PLE_PREFIX}.shard_0.weight": {"dtype": "BF16", "shape": [7, 7]},
+                    "model.language_model.layers.0.mlp.weight": {"dtype": "F32", "shape": [1]},
+                    "unindexed.weight": {"dtype": "F32", "shape": [1]},
+                },
+            )
+
+            with assert_raises(AuditError, "index/header disagreement"):
+                audit_checkpoint(model_dir, target, (root,))
+
     def test_read_header_rejects_truncated_header_length(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "truncated.safetensors"
             path.write_bytes(b"bad")
 
             with assert_raises(SafetensorsError, "truncated header length"):
+                read_header(path)
+
+    def test_read_header_rejects_oversized_header_before_reading_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "oversized.safetensors"
+            path.write_bytes(struct.pack("<Q", 100_000_001))
+
+            with assert_raises(SafetensorsError, "header exceeds 100 MiB"):
+                read_header(path)
+
+    def test_read_header_rejects_overlapping_tensor_ranges(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "overlap.safetensors"
+            header = {
+                "first": {"dtype": "BF16", "shape": [7, 7], "data_offsets": [0, 98]},
+                "second": {"dtype": "BF16", "shape": [7, 7], "data_offsets": [0, 98]},
+            }
+            encoded = json.dumps(header, separators=(",", ":")).encode("utf-8")
+            path.write_bytes(struct.pack("<Q", len(encoded)) + encoded + bytes(98))
+
+            with assert_raises(SafetensorsError, "contiguous"):
                 read_header(path)
 
 
