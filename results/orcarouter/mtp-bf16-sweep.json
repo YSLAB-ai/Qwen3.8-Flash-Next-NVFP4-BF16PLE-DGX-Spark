@@ -1,0 +1,52 @@
+{
+  "scope": "orcarouter/Qwen3.8-Flash-Next-Uncensored-NVFP4 only",
+  "target_revision": "3a3b63161c0745390e5270179af42e46efc70799",
+  "mtp_source": "RadixArk/Qwen3.8-Flash-Next-NVFP4",
+  "mtp_source_revision": "7b719225242aacd3dbd3f9407468c2ee9a9d2594",
+  "runtime": "vLLM 0.1.dev20073+g8e685d198",
+  "context_window": 32768,
+  "max_num_seqs": 1,
+  "gpu_memory_utilization": 0.8,
+  "sampling": {
+    "thinking": true,
+    "reasoning_effort": "medium",
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0
+  },
+  "measurement": "median of three fixed 256-token streamed samples after a 128-token warm-up",
+  "selected_depth": 2,
+  "mtp_overlay": {
+    "dtype": "BF16",
+    "loaded_tensors": 31,
+    "expected_tensors": 31,
+    "compact_file_gib": 4.86
+  },
+  "results": [
+    {"depth": 0, "median_decode_tokens_per_second": 31.1235, "median_ttft_seconds": 1.1963, "acceptance": null},
+    {"depth": 1, "median_decode_tokens_per_second": 39.1602, "median_ttft_seconds": 1.20583, "accepted_tokens": 305, "draft_tokens": 463, "acceptance": 0.6587},
+    {"depth": 2, "median_decode_tokens_per_second": 57.1303, "median_ttft_seconds": 1.32445, "accepted_tokens": 532, "draft_tokens": 722, "acceptance": 0.7368},
+    {"depth": 3, "median_decode_tokens_per_second": 55.5512, "median_ttft_seconds": 1.62869, "accepted_tokens": 563, "draft_tokens": 993, "acceptance": 0.5670},
+    {"depth": 4, "median_decode_tokens_per_second": 51.0404, "median_ttft_seconds": 1.12255, "accepted_tokens": 611, "draft_tokens": 1148, "acceptance": 0.5322},
+    {"depth": 5, "median_decode_tokens_per_second": 45.1911, "median_ttft_seconds": 1.24926, "accepted_tokens": 454, "draft_tokens": 1560, "acceptance": 0.2910},
+    {"depth": 6, "median_decode_tokens_per_second": 44.4321, "median_ttft_seconds": 1.42869, "accepted_tokens": 516, "draft_tokens": 1230, "acceptance": 0.4195},
+    {"depth": 8, "median_decode_tokens_per_second": 37.8855, "median_ttft_seconds": 1.75837, "accepted_tokens": 487, "draft_tokens": 1600, "acceptance": 0.3044},
+    {"depth": 10, "median_decode_tokens_per_second": 36.3225, "median_ttft_seconds": 1.64792, "accepted_tokens": 642, "draft_tokens": 2150, "acceptance": 0.2986}
+  ],
+  "native_context_validation": {
+    "max_model_len": 262144,
+    "max_num_seqs": 8,
+    "gpu_memory_utilization": 0.8,
+    "model_memory_gib": 76.21,
+    "available_kv_gib": 17.37,
+    "kv_capacity_tokens": 627960,
+    "maximum_concurrency_at_native_context": 2.4,
+    "prompt_tokens": 240051,
+    "exact_retrieval": true,
+    "ttft_seconds": 116.8036,
+    "prefill_tokens_per_second": 2055.17
+  }
+}

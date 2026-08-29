@@ -16,6 +16,7 @@ PUBLIC_DOCS = (
     ROOT / "docs" / "HOW-IT-WORKS.md",
     ROOT / "docs" / "COMPATIBILITY.md",
     ROOT / "docs" / "BENCHMARKS.md",
+    ROOT / "docs" / "SWE-BENCH-PILOT.md",
     ROOT / "docs" / "TROUBLESHOOTING.md",
     HF_CARD,
 )
@@ -83,9 +84,37 @@ class PublicationDocumentationTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn(
-            "scripts/qwen38-dgx-spark serve orca-uncensored --replace",
+            "scripts/qwen38-dgx-spark serve orca-uncensored-bf16-mtp --mtp 2 --replace",
             troubleshooting,
         )
+
+    def test_bf16_mtp_overlay_is_the_documented_qualified_default(self) -> None:
+        docs = "\n".join(path.read_text(encoding="utf-8") for path in PUBLIC_DOCS)
+        self.assertIn("orca-uncensored-bf16-mtp", docs)
+        self.assertIn("31/31", docs)
+        self.assertIn("MTP=2", docs)
+        self.assertIn("57.13 tok/s", docs)
+        self.assertIn("240,051 prompt tokens", docs)
+        for stale_claim in (
+            "requires `MTP=0`",
+            "MTP depths 2-4 | Not run",
+            "future graft experiment is not validated",
+        ):
+            self.assertNotIn(stale_claim, docs)
+
+    def test_mtp_sweep_has_a_machine_readable_record(self) -> None:
+        import json
+
+        record = json.loads(
+            (ROOT / "results" / "orcarouter" / "mtp-bf16-sweep.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(record["selected_depth"], 2)
+        self.assertEqual([row["depth"] for row in record["results"]], [0, 1, 2, 3, 4, 5, 6, 8, 10])
+        selected = next(row for row in record["results"] if row["depth"] == 2)
+        self.assertEqual(selected["median_decode_tokens_per_second"], 57.1303)
+        self.assertEqual(record["mtp_overlay"]["loaded_tensors"], 31)
 
     def test_private_deployment_terms_are_absent(self) -> None:
         forbidden = ("llm.labtools", "Cloudflare", "/home/yiwen", "OpenCode", "Palworld")

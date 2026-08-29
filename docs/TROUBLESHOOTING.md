@@ -33,23 +33,35 @@ mode for the mapped PLE path.
 Use the BF16 KV default. This model path requires BF16 KV, and an FP8 KV setting is
 not a supported substitute.
 
-## MTP appears enabled
+## MTP load guard reports fewer than 31/31 tensors
 
-Set `MTP=0`. The pinned Orcarouter checkpoint has zero MTP tensors. MTP1 provenance
-showed 0/1,287 accepted only because an incomplete draft was constructed; it is
-unsupported, not a tuning result. Depths 2-4 were not run for this checkpoint.
+Do not bypass the guard. Re-run preparation for the overlay so the recipe verifies
+and rebuilds its compact BF16 MTP file from the pinned source shards:
+
+```bash
+scripts/qwen38-dgx-spark prepare orca-uncensored-bf16-mtp
+```
+
+The original `orca-uncensored` target intentionally has no MTP weights. Use the
+separately named overlay target when passing `--mtp`.
+
+## Deep MTP reports a QSA capacity or block-size error
+
+Use the recipe command rather than constructing a raw vLLM invocation. The recipe
+automatically selects the required 48-token block alignment for depths five and
+higher. The qualified setting remains `MTP=2`.
 
 ## Replacing a running recipe container
 
 The serve command unloads an existing recipe container before it starts a replacement.
-If the default Orcarouter attempt ended unexpectedly, run the exact guarded replacement:
+If the qualified Orcarouter MTP attempt ended unexpectedly, run the guarded replacement:
 
 ```bash
-scripts/qwen38-dgx-spark serve orca-uncensored --replace
+scripts/qwen38-dgx-spark serve orca-uncensored-bf16-mtp --mtp 2 --replace
 ```
 
-For another manifest target, replace `orca-uncensored` with that target alias. Do not
-start an additional container manually.
+For another manifest target, replace the target alias and use only options supported
+for that target. Do not start an additional model container manually.
 
 For supported target layouts, see [Compatibility](COMPATIBILITY.md). Benchmark scope
 and limitations are in [Benchmarks](BENCHMARKS.md).

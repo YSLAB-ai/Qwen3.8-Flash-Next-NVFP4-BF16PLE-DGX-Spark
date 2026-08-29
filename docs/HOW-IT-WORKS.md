@@ -1,43 +1,55 @@
 # How it works
 
 The recipe serves NVFP4 Qwen3.8-Flash-Next while retaining the checkpoint's
-full-precision BF16 PLE on NVMe. The PLE is a lookup table: a request needs selected
-rows, not the entire table at once. The patched runtime memory-maps the PLE
-safetensors data and gathers those rows on demand.
+full-precision BF16 PLE on NVMe. A request needs selected lookup rows rather than the
+entire table, so the patched runtime memory-maps the PLE safetensors data and gathers
+those rows on demand.
 
 ## Memory layout
 
-For the pinned Orcarouter checkpoint revision
-`3a3b63161c0745390e5270179af42e46efc70799`, the measured model allocation was 71.13
-GiB. The BF16 PLE itself is 95.37 GiB on disk and is not copied wholesale into DGX
-Spark unified memory. This left approximately 20-21 GiB for the required BF16 KV
-cache in the qualified run. NVMe matters because it backs the mapped PLE data.
+The qualified Orcarouter MTP profile loaded 76.21 GiB of model state. The complete
+95.37 GiB BF16 PLE remains file-backed instead of being copied wholesale into DGX
+Spark unified memory. At 0.80 GPU-memory utilization, the profile exposed 17.37 GiB
+of BF16 KV, or 627,960 cached tokens.
 
 ## Runtime boundary
 
-The PLE gather includes host work and a host-to-device transfer, so it must run
-outside captured graph segments. The recipe therefore uses PIECEWISE CUDA-graph
-capture with the lookup declared as a splitting operation. BF16 KV is required by
-this model path; it is not interchangeable with an FP8 KV setting.
+PLE gathering includes host work and a host-to-device transfer, so it must run
+outside captured graph segments. The recipe uses PIECEWISE CUDA-graph capture with
+the lookup declared as a splitting operation. BF16 KV is required by this path and
+is not interchangeable with FP8 KV.
+
+## BF16 MTP overlay
+
+The Orcarouter repository contains no MTP weights. Its configuration alone cannot
+produce a valid draft model. The `orca-uncensored-bf16-mtp` target obtains exactly
+the 31 MTP tensors from a pinned, architecture-compatible RadixArk checkpoint,
+verifies their filenames, byte sizes, hashes, names, and BF16 dtype, then writes a
+4.86 GiB compact safetensors file into a deterministic local view.
+
+The view links to the untouched Orcarouter checkpoint for all original tensors and
+overlays only MTP tensors and the audited configuration needed to keep those native
+modules unquantized. A runtime load guard requires 31/31 tensors; missing or
+unexpected MTP state fails closed. This is a reproducible checkpoint view, not a
+redistributed derivative model.
+
+Depth testing selected `MTP=2`. At depths five and above, the recipe selects a
+48-token attention block size so both the 12-token QSA speculative ring and the
+kernel's 16-token alignment divide cleanly.
 
 ## Checkpoint-aware controls
 
-The current pinned Orcarouter checkpoint has zero MTP tensors, despite advertising
-one MTP layer in configuration. The recipe disables MTP (`MTP=0`) because an
-incomplete draft is unsupported. The observed MTP1 0/1,287 acceptance was produced
-by that incomplete draft and is invalid provenance, not a sampler outcome.
-
-The runtime validates the selected target's expected PLE layout before serving. The
-available direct-BF16 and hybrid-BF16 arrangements are described in
-[Compatibility](COMPATIBILITY.md); only Orcarouter has runtime qualification.
+The runtime validates each target's expected PLE layout before serving. Direct-BF16,
+hybrid-BF16, and MTP-overlay modes have separate pinned identities and approved
+filesystem roots. See [Compatibility](COMPATIBILITY.md); only the Orcarouter direct
+and MTP-overlay paths have runtime qualification.
 
 ## Operational safeguards
 
-Before download, the command enforces a 100 GiB free-disk gate. It supports gated
-Hugging Face login for checkpoints that require authorization. When a serve command
-replaces an existing recipe container, it unloads the prior container first. These
-guards keep the recipe's state and storage requirements explicit.
+Before download, the command enforces a 100 GiB free-disk gate. Gated Hugging Face
+access is checked with a small file before the full transfer. Existing containers
+can be replaced only when they carry this recipe's label, and the old container is
+unloaded before the memory-capacity gate runs.
 
-For measured behavior, including cold start and stability qualifications, see
-[Benchmarks](BENCHMARKS.md). For setup failures and recovery, see
+For measurements, see [Benchmarks](BENCHMARKS.md). For recovery guidance, see
 [Troubleshooting](TROUBLESHOOTING.md).
