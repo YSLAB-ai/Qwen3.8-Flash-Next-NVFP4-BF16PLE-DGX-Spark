@@ -37,6 +37,7 @@ class ManifestTests(unittest.TestCase):
         cases = {
             "unknown schema version": {"schema_version": 2},
             "non-integer schema version": {"schema_version": True},
+            "floating-point schema version": {"schema_version": 1.0},
             "invalid revision": {
                 "targets": [
                     _target(revision="A" * 40),

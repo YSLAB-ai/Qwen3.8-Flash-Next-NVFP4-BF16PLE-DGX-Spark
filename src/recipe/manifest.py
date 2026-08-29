@@ -88,10 +88,13 @@ def load_manifest(path: Path) -> Manifest:
 
     _require_object(document, "manifest")
     _require_exact_fields(document, {"schema_version", "targets"}, "manifest")
-    if document["schema_version"] != _SCHEMA_VERSION or isinstance(
-        document["schema_version"], bool
+    schema_version = document["schema_version"]
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version != _SCHEMA_VERSION
     ):
-        raise ManifestError(f"unsupported schema version: {document['schema_version']!r}")
+        raise ManifestError(f"unsupported schema version: {schema_version!r}")
     if not isinstance(document["targets"], list):
         raise ManifestError("manifest.targets must be a list")
 
