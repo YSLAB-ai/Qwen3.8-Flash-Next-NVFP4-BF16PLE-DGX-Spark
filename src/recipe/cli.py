@@ -95,16 +95,21 @@ def main(
         if args.command == "dry-run":
             print(" ".join(command))
             return 0
-        validate_environment(
-            options,
-            args.unsafe_override,
-            minimum_free_bytes=target.minimum_free_bytes,
-            disk_path=cache,
-            allow_mtp=target.mode == "mtp_overlay",
-        )
         approved_roots = (cache, cache.parent / "recipe-views")
         audit_checkpoint(model_path, target, approved_roots)
-        start_container(command, target, replace=args.replace, runner=runner)
+        start_container(
+            command,
+            target,
+            replace=args.replace,
+            runner=runner,
+            pre_start=lambda: validate_environment(
+                options,
+                args.unsafe_override,
+                minimum_free_bytes=target.minimum_free_bytes,
+                disk_path=cache,
+                allow_mtp=target.mode == "mtp_overlay",
+            ),
+        )
         print(f"started {served_model_alias(target)} on {options.bind}:{options.port}")
         return 0
     parser.error(f"unknown command: {args.command}")

@@ -211,6 +211,7 @@ def start_container(
     *,
     replace: bool,
     runner: Callable[..., object] = subprocess.run,
+    pre_start: Callable[[], object] | None = None,
 ) -> None:
     """Start the command, replacing only an existing recipe-labelled container."""
     name = container_name_for(target)
@@ -239,6 +240,8 @@ def start_container(
         if getattr(label, "stdout", "").strip() != RECIPE_LABEL:
             raise RuntimeError(f"refusing to replace container without recipe label: {name}")
         runner(["docker", "rm", "-f", name], check=True)
+    if pre_start is not None:
+        pre_start()
     runner(list(command), check=True)
 
 

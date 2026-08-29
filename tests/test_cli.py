@@ -134,6 +134,42 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(runner.calls, [["docker", "container", "inspect", "qwen38-flash-orca-uncensored"]])
 
+    def test_replace_unloads_existing_recipe_before_memory_validation(self):
+        events: list[str] = []
+
+        def runner(command, **_kwargs):
+            command = list(command)
+            if command[:4] == ["docker", "container", "inspect", "--format"]:
+                events.append("label")
+                return _Result(0, "qwen38-flash-next-bf16-ple\n")
+            if command[:3] == ["docker", "container", "inspect"]:
+                events.append("inspect")
+                return _Result(0)
+            if command[:3] == ["docker", "rm", "-f"]:
+                events.append("remove")
+                return _Result(0)
+            if command[:2] == ["docker", "run"]:
+                events.append("run")
+                return _Result(0)
+            raise AssertionError(f"unexpected runtime command: {command}")
+
+        def validate(*_args, **_kwargs):
+            events.append("validate")
+
+        with patch("recipe.cli.validate_environment", side_effect=validate), patch(
+            "recipe.cli.audit_checkpoint"
+        ), redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                main(
+                    ["serve", "orca-uncensored", "--replace"],
+                    manifest_path=ROOT / "compatibility.json",
+                    runner=runner,
+                ),
+                0,
+            )
+
+        self.assertEqual(events, ["inspect", "label", "remove", "validate", "run"])
+
     def test_runtime_cli_rejects_mtp_on_original_target(self):
         with self.assertRaisesRegex(ValueError, "MTP"), redirect_stdout(io.StringIO()):
             main(
