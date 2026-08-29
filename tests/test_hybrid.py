@@ -68,6 +68,17 @@ class HybridViewTests(unittest.TestCase):
             with self.assertRaises(HybridError):
                 build_hybrid_view(target_dir, source_dir, temporary / "views", target)
 
+    def test_hybrid_refuses_existing_view_with_tampered_index(self):
+        """A final view is not reusable when its index digest no longer matches metadata."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            target_dir, source_dir, target = make_target_and_source(temporary)
+            view = build_hybrid_view(target_dir, source_dir, temporary / "views", target)
+            (view / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
+
+            with self.assertRaises(HybridError):
+                build_hybrid_view(target_dir, source_dir, temporary / "views", target)
+
     def test_hybrid_refuses_stale_build_directory(self):
         """A previous partial build is preserved for inspection rather than deleted."""
         with tempfile.TemporaryDirectory() as directory:
@@ -100,16 +111,74 @@ class HybridViewTests(unittest.TestCase):
             self.assertTrue((view / weight_map[TRUNK_NAME]).is_symlink())
             self.assertTrue((view / weight_map[PLE_SHARD_0]).is_symlink())
 
-    def test_hybrid_does_not_copy_non_safetensors_weight_payloads(self):
-        """Only serving metadata, never alternate weight formats, belongs in the view."""
+    def test_hybrid_ignores_unknown_metadata_payloads(self):
+        """An unlisted extensionless payload is not copied into the serving view."""
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             target_dir, source_dir, target = make_target_and_source(temporary)
-            (target_dir / "pytorch_model.bin").write_bytes(b"not metadata")
+            (target_dir / "unknown-payload").write_bytes(b"not serving metadata")
 
             view = build_hybrid_view(target_dir, source_dir, temporary / "views", target)
 
-            self.assertFalse((view / "pytorch_model.bin").exists())
+            self.assertFalse((view / "unknown-payload").exists())
+
+    def test_hybrid_rejects_oversized_serving_metadata(self):
+        """An allowlisted serving file over 16 MiB fails instead of being copied."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            target_dir, source_dir, target = make_target_and_source(temporary)
+            (target_dir / "tokenizer.json").write_bytes(b"x" * (16 * 1024 * 1024 + 1))
+
+            with self.assertRaises(HybridError):
+                build_hybrid_view(target_dir, source_dir, temporary / "views", target)
+
+    def test_hybrid_rejects_noncanonical_input_snapshots(self):
+        """Only the target and source's exact HF snapshot paths can establish identity."""
+        cases = (
+            ("target repo", "target", "repo"),
+            ("target revision", "target", "revision"),
+            ("source repo", "source", "repo"),
+            ("source revision", "source", "revision"),
+        )
+        for label, snapshot_name, mismatch in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                temporary = Path(directory)
+                target_dir, source_dir, target = make_target_and_source(temporary)
+                original = target_dir if snapshot_name == "target" else source_dir
+                if mismatch == "repo":
+                    moved = (
+                        original.parent.parent.parent
+                        / "models--example--wrong"
+                        / "snapshots"
+                        / original.name
+                    )
+                else:
+                    moved = original.with_name("c" * 40)
+                moved.parent.mkdir(parents=True, exist_ok=True)
+                original.rename(moved)
+                if snapshot_name == "target":
+                    target_dir = moved
+                else:
+                    source_dir = moved
+
+                with self.assertRaises(HybridError):
+                    build_hybrid_view(target_dir, source_dir, temporary / "views", target)
+
+                self.assertFalse((temporary / "views").exists())
+
+    def test_hybrid_rejects_output_root_inside_upstream_snapshot(self):
+        """A view root nested inside either immutable upstream snapshot is unsafe."""
+        for label, snapshot_name in (("target", "target"), ("source", "source")):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                temporary = Path(directory)
+                target_dir, source_dir, target = make_target_and_source(temporary)
+                snapshot = target_dir if snapshot_name == "target" else source_dir
+                output_root = snapshot / "generated" / "views"
+
+                with self.assertRaises(HybridError):
+                    build_hybrid_view(target_dir, source_dir, output_root, target)
+
+                self.assertFalse(output_root.exists())
 
     def test_hybrid_keeps_failed_audit_out_of_final_path(self):
         """Header/index disagreement fails audit before the temporary view is finalized."""
@@ -136,10 +205,6 @@ def make_target_and_source(
     source_shards: tuple[str, str] = ("source/ple-0.safetensors", "source/ple-1.safetensors"),
     source_extra_tensor: bool = False,
 ) -> tuple[Path, Path, Target]:
-    target_dir = tmp_path / "target"
-    source_dir = tmp_path / "source"
-    target_dir.mkdir()
-    source_dir.mkdir()
     target = Target(
         name="radixark",
         repo_id="example/radixark",
@@ -158,6 +223,12 @@ def make_target_and_source(
             split_parts=2,
         ),
     )
+    target_dir = snapshot_path(tmp_path, target.repo_id, target.revision)
+    source_dir = snapshot_path(
+        tmp_path, target.ple_source.repo_id, target.ple_source.revision
+    )
+    target_dir.mkdir(parents=True)
+    source_dir.mkdir(parents=True)
     write_json(
         target_dir / "config.json",
         {
@@ -204,6 +275,16 @@ def make_target_and_source(
         {"weight_map": {PLE_SHARD_0: source_shards[0], PLE_SHARD_1: source_shards[1]}},
     )
     return target_dir, source_dir, target
+
+
+def snapshot_path(tmp_path: Path, repo_id: str, revision: str) -> Path:
+    return (
+        tmp_path
+        / "cache"
+        / f"models--{repo_id.replace('/', '--')}"
+        / "snapshots"
+        / revision
+    )
 
 
 def load_weight_map(view: Path) -> dict[str, str]:

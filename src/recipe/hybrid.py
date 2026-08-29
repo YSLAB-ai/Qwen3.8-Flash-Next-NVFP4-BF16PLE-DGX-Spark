@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -22,18 +23,23 @@ _INDEX_NAME = "model.safetensors.index.json"
 _METADATA_NAME = "recipe-metadata.json"
 _METADATA_FIELDS = {"target", "ple_source", "index_sha256"}
 _MODEL_REF_FIELDS = {"repo_id", "revision"}
-_WEIGHT_SUFFIXES = {
-    ".bin",
-    ".ckpt",
-    ".gguf",
-    ".h5",
-    ".msgpack",
-    ".npz",
-    ".onnx",
-    ".pt",
-    ".pth",
-    ".safetensors",
+_SERVING_METADATA_FILES = {
+    "added_tokens.json",
+    "chat_template.json",
+    "chat_template.jinja",
+    "config.json",
+    "generation_config.json",
+    "merges.txt",
+    "preprocessor_config.json",
+    "processor_config.json",
+    "sentencepiece.bpe.model",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "vocab.json",
 }
+_MAX_METADATA_BYTES = 16 * 1024 * 1024
+_REVISION = re.compile(r"[0-9a-f]{40}")
 
 
 def build_hybrid_view(
@@ -45,9 +51,16 @@ def build_hybrid_view(
     audited while still temporary, then atomically renamed into its final path.
     """
     _validate_hybrid_target(target)
-    target_snapshot = _resolve_directory(target_snapshot, "target snapshot")
-    source_snapshot = _resolve_directory(source_snapshot, "PLE source snapshot")
-    output_root = Path(output_root)
+    target_snapshot = _resolve_snapshot(
+        target_snapshot, "target snapshot", target.repo_id, target.revision
+    )
+    source_snapshot = _resolve_snapshot(
+        source_snapshot,
+        "PLE source snapshot",
+        target.ple_source.repo_id,
+        target.ple_source.revision,
+    )
+    output_root = _resolve_output_root(output_root, target_snapshot, source_snapshot)
     fingerprint = _fingerprint(target)
     final = output_root / _safe_target_name(target) / fingerprint
 
@@ -132,14 +145,26 @@ def _build_links_and_index(
 
 
 def _copy_model_metadata(snapshot: Path, destination: Path) -> None:
-    for entry in snapshot.iterdir():
-        if entry.name in {_INDEX_NAME, _METADATA_NAME} or entry.suffix in _WEIGHT_SUFFIXES:
+    for filename in sorted(_SERVING_METADATA_FILES):
+        entry = snapshot / filename
+        if not _path_exists(entry):
             continue
-        if entry.is_file():
-            try:
-                shutil.copyfile(entry, destination / entry.name)
-            except OSError as exc:
-                raise HybridError(f"unable to copy model metadata: {entry}") from exc
+        try:
+            resolved = entry.resolve(strict=True)
+        except OSError as exc:
+            raise HybridError(f"unable to resolve model metadata: {entry}") from exc
+        if not resolved.is_file():
+            raise HybridError(f"model metadata is not a regular file: {entry}")
+        try:
+            size = resolved.stat().st_size
+        except OSError as exc:
+            raise HybridError(f"unable to stat model metadata: {entry}") from exc
+        if size > _MAX_METADATA_BYTES:
+            raise HybridError(f"model metadata exceeds 16 MiB: {entry}")
+        try:
+            shutil.copyfile(resolved, destination / filename)
+        except OSError as exc:
+            raise HybridError(f"unable to copy model metadata: {entry}") from exc
 
 
 def _make_weight_links(
@@ -224,20 +249,39 @@ def _resolve_weight_file(snapshot: Path, filename: str) -> Path:
     return resolved
 
 
-def _resolve_directory(path: Path, label: str) -> Path:
+def _resolve_snapshot(path: Path, label: str, repo_id: str, revision: str) -> Path:
     try:
         resolved = Path(path).resolve(strict=True)
     except OSError as exc:
         raise HybridError(f"{label} does not exist: {path}") from exc
     if not resolved.is_dir():
         raise HybridError(f"{label} is not a directory: {path}")
+    expected_cache_dir = "models--" + repo_id.replace("/", "--")
+    if (
+        not _REVISION.fullmatch(revision)
+        or resolved.name != revision
+        or resolved.parent.name != "snapshots"
+        or resolved.parent.parent.name != expected_cache_dir
+    ):
+        raise HybridError(f"{label} does not match its pinned Hugging Face snapshot identity")
+    return resolved
+
+
+def _resolve_output_root(
+    output_root: Path, target_snapshot: Path, source_snapshot: Path
+) -> Path:
+    try:
+        resolved = Path(output_root).resolve(strict=False)
+    except OSError as exc:
+        raise HybridError(f"unable to resolve hybrid output root: {output_root}") from exc
+    for snapshot in (target_snapshot, source_snapshot):
+        if _is_relative_to(resolved, snapshot):
+            raise HybridError("hybrid output root must not be inside an upstream snapshot")
     return resolved
 
 
 def _approved_root(snapshot: Path) -> Path:
-    if snapshot.parent.name == "snapshots" and snapshot.parent.parent.name.startswith("models--"):
-        return snapshot.parent.parent
-    return snapshot
+    return snapshot.parent.parent
 
 
 def _validate_hybrid_target(target: Target) -> None:
@@ -298,3 +342,11 @@ def _json_bytes(value: object) -> bytes:
 
 def _path_exists(path: Path) -> bool:
     return path.exists() or path.is_symlink()
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
