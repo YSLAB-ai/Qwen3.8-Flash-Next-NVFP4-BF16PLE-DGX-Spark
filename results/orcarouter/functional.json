@@ -1,0 +1,72 @@
+{
+  "image": {
+    "expected": {
+      "blue_circles": 2,
+      "red_squares": 3
+    },
+    "fixture": "vision-shapes.png",
+    "height": 120,
+    "sha256": "cbbde3001860aaddf5ebc272bb6fdbb3b458c500c9abab40d6a9ee26b7903852",
+    "width": 160
+  },
+  "public_revision": "3a3b63161c0745390e5270179af42e46efc70799",
+  "results": {
+    "code": {
+      "elapsed_seconds": 1.8708403399214149,
+      "passed": true,
+      "usage": {
+        "completion_tokens": 47,
+        "prompt_tokens": 30,
+        "total_tokens": 77
+      }
+    },
+    "factual": {
+      "elapsed_seconds": 2.6774355788948014,
+      "passed": true,
+      "usage": {
+        "completion_tokens": 68,
+        "prompt_tokens": 28,
+        "total_tokens": 96
+      }
+    },
+    "json": {
+      "elapsed_seconds": 4.319320451002568,
+      "passed": true,
+      "usage": {
+        "completion_tokens": 102,
+        "prompt_tokens": 29,
+        "total_tokens": 131
+      }
+    },
+    "tool": {
+      "elapsed_seconds": 2.593045651912689,
+      "passed": true,
+      "usage": {
+        "completion_tokens": 45,
+        "prompt_tokens": 280,
+        "total_tokens": 325
+      }
+    },
+    "vision": {
+      "elapsed_seconds": 5.937868133070879,
+      "passed": true,
+      "usage": {
+        "completion_tokens": 148,
+        "prompt_tokens": 104,
+        "total_tokens": 252
+      }
+    }
+  },
+  "sampler": {
+    "chat_template_kwargs": {
+      "enable_thinking": true,
+      "reasoning_effort": "medium"
+    },
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "temperature": 1.0,
+    "top_k": 20,
+    "top_p": 0.95
+  }
+}

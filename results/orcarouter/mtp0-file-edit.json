@@ -1,0 +1,60 @@
+{
+  "concurrency": 1,
+  "long_context_tokens": 0,
+  "max_tokens": 256,
+  "public_revision": "3a3b63161c0745390e5270179af42e46efc70799",
+  "repeats": 3,
+  "sampler": {
+    "chat_template_kwargs": {
+      "enable_thinking": true,
+      "reasoning_effort": "medium"
+    },
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "temperature": 1.0,
+    "top_k": 20,
+    "top_p": 0.95
+  },
+  "samples": [
+    {
+      "completion_tokens": 215,
+      "correct": true,
+      "decode_seconds": 7.6333087489474565,
+      "decode_tokens_per_second": 28.035024789152946,
+      "end_to_end_tokens_per_second": 27.390356511512795,
+      "fixture": "file_edit",
+      "output_sha256": "085edb57d778d93f135408f9e818d5bbd0a3dde7645a17dcd2114f6f7db56366",
+      "prefill_tokens_per_second": 277.31647252871034,
+      "prompt_tokens": 50,
+      "total_seconds": 7.849477968993597,
+      "ttft_seconds": 0.18029942305292934
+    },
+    {
+      "completion_tokens": 256,
+      "correct": true,
+      "decode_seconds": 8.978504594997503,
+      "decode_tokens_per_second": 28.4011660630075,
+      "end_to_end_tokens_per_second": 27.965905373153763,
+      "fixture": "file_edit",
+      "output_sha256": "17ca9e4309bfd5c692135dd3cfe7afe1aefcab505202c0ef6e576445fcfd92d1",
+      "prefill_tokens_per_second": 285.1065819030401,
+      "prompt_tokens": 50,
+      "total_seconds": 9.154003654955886,
+      "ttft_seconds": 0.17537301196716726
+    },
+    {
+      "completion_tokens": 256,
+      "correct": true,
+      "decode_seconds": 8.967794741969556,
+      "decode_tokens_per_second": 28.43508435876572,
+      "end_to_end_tokens_per_second": 28.06078529085751,
+      "fixture": "file_edit",
+      "output_sha256": "17ca9e4309bfd5c692135dd3cfe7afe1aefcab505202c0ef6e576445fcfd92d1",
+      "prefill_tokens_per_second": 322.15584426159535,
+      "prompt_tokens": 50,
+      "total_seconds": 9.123051879927516,
+      "ttft_seconds": 0.155204385984689
+    }
+  ]
+}

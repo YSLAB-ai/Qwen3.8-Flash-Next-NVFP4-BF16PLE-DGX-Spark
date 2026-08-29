@@ -1,0 +1,42 @@
+{
+  "elapsed_seconds": 904.0534942589002,
+  "interval_seconds": 900.0,
+  "probes": [
+    {
+      "health_status": 200,
+      "mem_available_bytes": 15766261760,
+      "passed": true,
+      "swap_used_bytes": 1993744384,
+      "usage": {
+        "completion_tokens": 111,
+        "prompt_tokens": 36,
+        "total_tokens": 147
+      }
+    },
+    {
+      "health_status": 200,
+      "mem_available_bytes": 16045051904,
+      "passed": true,
+      "swap_used_bytes": 1940955136,
+      "usage": {
+        "completion_tokens": 111,
+        "prompt_tokens": 36,
+        "total_tokens": 147
+      }
+    }
+  ],
+  "public_revision": "3a3b63161c0745390e5270179af42e46efc70799",
+  "requested_duration_seconds": 7200.0,
+  "sampler": {
+    "chat_template_kwargs": {
+      "enable_thinking": true,
+      "reasoning_effort": "medium"
+    },
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "temperature": 1.0,
+    "top_k": 20,
+    "top_p": 0.95
+  }
+}

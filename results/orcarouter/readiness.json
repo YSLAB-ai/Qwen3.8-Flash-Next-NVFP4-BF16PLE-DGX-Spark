@@ -1,0 +1,33 @@
+{
+  "concurrency": 1,
+  "long_context_tokens": 0,
+  "max_tokens": 5,
+  "public_revision": "3a3b63161c0745390e5270179af42e46efc70799",
+  "repeats": 1,
+  "sampler": {
+    "chat_template_kwargs": {
+      "enable_thinking": true,
+      "reasoning_effort": "medium"
+    },
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "temperature": 1.0,
+    "top_k": 20,
+    "top_p": 0.95
+  },
+  "samples": [
+    {
+      "completion_tokens": 5,
+      "decode_seconds": 0.143616214976646,
+      "decode_tokens_per_second": 27.852008219618206,
+      "end_to_end_tokens_per_second": 4.110214152593142,
+      "fixture": "reasoning",
+      "output_sha256": "5f1ce898a55664c50c3d1e937cc43fa7064c3efc57e9ee1f43b89857a965e57a",
+      "prefill_tokens_per_second": 27.032794861851805,
+      "prompt_tokens": 29,
+      "total_seconds": 1.2164816270815209,
+      "ttft_seconds": 1.0727710600476712
+    }
+  ]
+}

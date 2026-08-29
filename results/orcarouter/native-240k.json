@@ -1,0 +1,35 @@
+{
+  "context": {
+    "max_model_len": 262144,
+    "tokenization_history": [
+      {
+        "prompt_tokens": 240079
+      }
+    ],
+    "tokenize_count": 240079
+  },
+  "decode_seconds": 4.016319844988175,
+  "decode_tokens_per_second": 27.388256972926385,
+  "passed": true,
+  "prefill_tokens_per_second": 2107.0552980928996,
+  "public_revision": "3a3b63161c0745390e5270179af42e46efc70799",
+  "sampler": {
+    "chat_template_kwargs": {
+      "enable_thinking": true,
+      "reasoning_effort": "medium"
+    },
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "temperature": 1.0,
+    "top_k": 20,
+    "top_p": 0.95
+  },
+  "total_seconds": 118.01364149106666,
+  "ttft_seconds": 113.94053123204503,
+  "usage": {
+    "completion_tokens": 111,
+    "prompt_tokens": 240079,
+    "total_tokens": 240190
+  }
+}
