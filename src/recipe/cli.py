@@ -61,17 +61,12 @@ def main(
         return 0
     if args.command == "prepare":
         model_path = download_target(target, cache, args.image)
-        approved_roots = (
-            (cache, cache.parent / "recipe-views")
-            if target.mode in {"hybrid_bf16", "mtp_overlay"}
-            else (cache,)
-        )
-        audit_checkpoint(model_path, target, approved_roots)
+        audit_checkpoint(model_path, target, _approved_roots(target, cache))
         print(model_path)
         return 0
     if args.command == "audit":
         model_path = local_target_path(target, cache)
-        audit_checkpoint(model_path, target, (cache,))
+        audit_checkpoint(model_path, target, _approved_roots(target, cache))
         print(model_path)
         return 0
     if args.command in {"serve", "dry-run"}:
@@ -157,6 +152,12 @@ def _print_targets(targets: Iterable[Target]) -> None:
     for target in sorted(targets, key=lambda item: item.name):
         state = _VALIDATION_STATES.get(target.name, "manifest-pinned")
         print(f"{target.name}\t{state}\t{target.repo_id}@{target.revision}")
+
+
+def _approved_roots(target: Target, cache: Path) -> tuple[Path, ...]:
+    if target.mode in {"hybrid_bf16", "mtp_overlay"}:
+        return cache, cache.parent / "recipe-views"
+    return (cache,)
 
 
 if __name__ == "__main__":

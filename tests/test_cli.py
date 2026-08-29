@@ -59,6 +59,26 @@ class CliTests(unittest.TestCase):
         download.assert_called_once()
         audit.assert_called_once_with(resolved, target, (Path("/safe/cache"),))
 
+    def test_audit_allows_the_recipe_view_for_mtp_overlay(self):
+        target = load_manifest(ROOT / "compatibility.json").target(
+            "orca-uncensored-bf16-mtp"
+        )
+        expected = Path("/safe/recipe-views") / target.name / "prepared-view"
+        with patch("recipe.cli.local_target_path", return_value=expected), patch(
+            "recipe.cli.audit_checkpoint"
+        ) as audit, redirect_stdout(io.StringIO()):
+            exit_code = main(
+                ["audit", target.name, "--cache", "/safe/hf-cache"],
+                manifest_path=ROOT / "compatibility.json",
+            )
+
+        self.assertEqual(exit_code, 0)
+        audit.assert_called_once_with(
+            expected,
+            target,
+            (Path("/safe/hf-cache"), Path("/safe/recipe-views")),
+        )
+
     def test_login_and_download_share_the_requested_cache_contract(self):
         """CLI authentication must populate the same mounted cache used by download."""
         cache = Path("/safe/shared-hf-cache")
