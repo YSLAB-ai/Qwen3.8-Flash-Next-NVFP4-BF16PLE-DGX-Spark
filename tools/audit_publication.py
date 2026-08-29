@@ -96,7 +96,7 @@ def _is_allowed_test_fixture(root: Path, path: Path) -> bool:
         relative = path.relative_to(root)
     except ValueError:
         return False
-    if "tests" not in relative.parts or path.suffix != ".py":
+    if relative.parent != Path("tests") or not relative.name.startswith("test_"):
         return False
     try:
         return TEST_FIXTURE_MARKER in path.read_text(encoding="utf-8", errors="replace")

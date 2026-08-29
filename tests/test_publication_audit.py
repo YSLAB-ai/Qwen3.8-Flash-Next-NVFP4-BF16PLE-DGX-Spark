@@ -54,26 +54,35 @@ class PublicationAuditTests(unittest.TestCase):
                 {item.code for item in findings}, {"external-symlink", "oversized-file"}
             )
 
-    def test_marker_only_allows_deliberate_fixture_in_test_file(self):
+    def test_marker_only_allows_root_test_modules(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            test_fixture = root / "tests" / "fixture.py"
-            test_fixture.parent.mkdir()
-            test_fixture.write_text(
+            test_module = root / "tests" / "test_fixture.py"
+            test_module.parent.mkdir()
+            test_module.write_text(
                 "# publication-audit: allow-test-fixture\nAPI_KEY=fixture_value\n",
                 encoding="utf-8",
             )
-            non_test_fixture = root / "config.py"
-            non_test_fixture.write_text(
+            test_helper = root / "tests" / "fixture.py"
+            test_helper.write_text(
+                "# publication-audit: allow-test-fixture\nAPI_KEY=fixture_value\n",
+                encoding="utf-8",
+            )
+            nested_helper = root / "src" / "tests" / "test_helper.py"
+            nested_helper.parent.mkdir(parents=True)
+            nested_helper.write_text(
                 "# publication-audit: allow-test-fixture\nAPI_KEY=fixture_value\n",
                 encoding="utf-8",
             )
 
-            allowed = audit_tree(root, [test_fixture])
-            rejected = audit_tree(root, [non_test_fixture])
+            allowed = audit_tree(root, [test_module])
+            rejected = audit_tree(root, [test_helper, nested_helper])
 
             self.assertEqual(allowed, [])
-            self.assertIn("secret-assignment", {item.code for item in rejected})
+            self.assertEqual(
+                {item.path for item in rejected if item.code == "secret-assignment"},
+                {Path("tests/fixture.py"), Path("src/tests/test_helper.py")},
+            )
 
     def test_current_public_files_are_publishable(self):
         files = [
