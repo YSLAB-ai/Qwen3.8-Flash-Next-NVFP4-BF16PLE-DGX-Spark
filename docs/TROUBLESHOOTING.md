@@ -2,8 +2,12 @@
 
 ## Gated checkpoint download fails
 
-Log in with a Hugging Face account that has accepted the selected checkpoint's access
-conditions:
+First sign in on the
+[`orcarouter/Qwen3.8-Flash-Next-Uncensored-NVFP4` page](https://huggingface.co/orcarouter/Qwen3.8-Flash-Next-Uncensored-NVFP4)
+and accept the request to share your contact information. A CLI token cannot grant
+access until the browser-side conditions have been accepted for that same account.
+
+Then log the recipe into that account:
 
 ```bash
 scripts/qwen38-dgx-spark login

@@ -59,6 +59,24 @@ class PublicationDocumentationTests(unittest.TestCase):
         self.assertNotIn("github.com/blazux/qwen3.8-Flash-DGX", docs)
         self.assertNotIn("huggingface-cli login", docs)
 
+    def test_gated_orcarouter_access_is_an_explicit_browser_prerequisite(self) -> None:
+        docs = "\n".join(path.read_text(encoding="utf-8") for path in PUBLIC_DOCS)
+        gate_url = (
+            "https://huggingface.co/orcarouter/"
+            "Qwen3.8-Flash-Next-Uncensored-NVFP4"
+        )
+        self.assertIn(gate_url, README.read_text(encoding="utf-8"))
+        self.assertIn("accept", docs.lower())
+        self.assertIn("share your contact information", docs.lower())
+        self.assertIn("scripts/qwen38-dgx-spark login", docs)
+
+    def test_hugging_face_card_contains_the_complete_readme(self) -> None:
+        card = HF_CARD.read_text(encoding="utf-8")
+        self.assertTrue(card.startswith("---\n"))
+        _opening, separator, body = card[4:].partition("\n---\n")
+        self.assertTrue(separator)
+        self.assertEqual(body.lstrip("\n"), README.read_text(encoding="utf-8"))
+
     def test_troubleshooting_shows_target_specific_replace_command(self) -> None:
         """Recovery guidance must include the target required by the serve parser."""
         troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(

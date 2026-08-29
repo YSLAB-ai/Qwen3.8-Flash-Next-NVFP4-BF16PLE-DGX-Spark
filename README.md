@@ -41,8 +41,12 @@ including pinned revisions, are in [Compatibility](docs/COMPATIBILITY.md).
 
 - One NVIDIA DGX Spark (GB10) with its NVMe storage available to the recipe.
 - At least 100 GiB free disk space before download; the command checks this gate.
-- Access to gated Hugging Face checkpoint repositories and a logged-in Hugging Face
-  client where the selected checkpoint requires it.
+- A Hugging Face account that has accepted the Orcarouter checkpoint's access
+  conditions. Open the
+  [`orcarouter/Qwen3.8-Flash-Next-Uncensored-NVFP4` page](https://huggingface.co/orcarouter/Qwen3.8-Flash-Next-Uncensored-NVFP4),
+  sign in, and accept the request to share your contact information before running
+  the terminal commands. CLI login alone cannot grant gated access.
+- A Hugging Face read token entered through the recipe's interactive login command.
 - Docker with NVIDIA runtime support.
 
 ## Quick start
@@ -55,6 +59,12 @@ scripts/qwen38-dgx-spark login
 scripts/download-weights.sh
 scripts/serve.sh
 ```
+
+The browser acceptance step above is required once for the Hugging Face account.
+`scripts/qwen38-dgx-spark login` then stores that account's token in the same local
+recipe cache used by the downloader. Before transferring the full checkpoint, the
+downloader requests only `config.json` to fail early with a gated-access explanation
+if either step is missing.
 
 The default target is the pinned Orcarouter recipe. The wrapper validates the
 checkpoint layout and disk gate before serving. Use `scripts/qwen38-dgx-spark

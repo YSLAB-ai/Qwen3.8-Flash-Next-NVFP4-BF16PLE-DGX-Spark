@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
@@ -147,6 +148,44 @@ class DownloadTests(unittest.TestCase):
             cache.parent / "recipe-views",
             target,
         )
+
+    def test_gated_target_checks_small_file_access_before_full_download(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "hf-cache"
+            target = replace(direct_target(), requires_auth=True, minimum_free_bytes=1)
+            calls: list[list[str]] = []
+
+            result = download_target(
+                target,
+                cache,
+                "qwen38-flash-dgx",
+                runner=lambda command, **_kwargs: calls.append(command),
+            )
+
+        self.assertEqual(result, downloaded_snapshot_path(cache, target))
+        self.assertEqual(len(calls), 2)
+        self.assertIn("config.json", calls[0])
+        self.assertNotIn("config.json", calls[1])
+        self.assertIn(target.repo_id, calls[0])
+        self.assertIn(target.revision, calls[0])
+
+    def test_gated_access_failure_explains_browser_acceptance_and_login(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = replace(direct_target(), requires_auth=True, minimum_free_bytes=1)
+
+            def denied(command, **_kwargs):
+                raise subprocess.CalledProcessError(1, command)
+
+            with self.assertRaisesRegex(
+                DownloadError,
+                r"accept.*https://huggingface.co/example/direct.*recipe login",
+            ):
+                download_target(
+                    target,
+                    Path(directory) / "hf-cache",
+                    "qwen38-flash-dgx",
+                    runner=denied,
+                )
 
     def test_hybrid_download_refuses_source_index_missing_an_expected_ple_name(self):
         with tempfile.TemporaryDirectory() as directory:

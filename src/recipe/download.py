@@ -66,6 +66,17 @@ def download_target(
     cache.mkdir(parents=True, exist_ok=True)
     _require_free_space(cache, target.minimum_free_bytes)
     target_ref = ModelRef(target.repo_id, target.revision)
+    if target.requires_auth:
+        try:
+            runner(
+                build_hf_download_command(target_ref, ("config.json",), cache, image),
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise DownloadError(
+                "gated checkpoint access denied: accept the repository conditions at "
+                f"https://huggingface.co/{target.repo_id} and then run the recipe login command"
+            ) from exc
     runner(build_hf_download_command(target_ref, (), cache, image), check=True)
     target_snapshot = snapshot_path(cache, target_ref)
     if target.mode == "direct_bf16":
