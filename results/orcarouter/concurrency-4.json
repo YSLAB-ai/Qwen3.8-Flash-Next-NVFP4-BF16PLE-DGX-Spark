@@ -3,6 +3,60 @@
   "concurrency": 4,
   "max_tokens": 512,
   "public_revision": "3a3b63161c0745390e5270179af42e46efc70799",
+  "results": [
+    {
+      "correct": true,
+      "decode_seconds": 6.122217218973674,
+      "decode_tokens_per_second": 17.804007290396783,
+      "passed": true,
+      "total_seconds": 23.054024399025366,
+      "ttft_seconds": 16.864325075992383,
+      "usage": {
+        "completion_tokens": 110,
+        "prompt_tokens": 8192,
+        "total_tokens": 8302
+      }
+    },
+    {
+      "correct": true,
+      "decode_seconds": 13.481518442975357,
+      "decode_tokens_per_second": 8.604372014225344,
+      "passed": true,
+      "total_seconds": 23.228546233964153,
+      "ttft_seconds": 9.69532080506906,
+      "usage": {
+        "completion_tokens": 117,
+        "prompt_tokens": 8192,
+        "total_tokens": 8309
+      }
+    },
+    {
+      "correct": true,
+      "decode_seconds": 6.177007260033861,
+      "decode_tokens_per_second": 17.807976479437876,
+      "passed": true,
+      "total_seconds": 23.063520174007863,
+      "ttft_seconds": 16.819657018058933,
+      "usage": {
+        "completion_tokens": 111,
+        "prompt_tokens": 8192,
+        "total_tokens": 8303
+      }
+    },
+    {
+      "correct": true,
+      "decode_seconds": 8.686314840102568,
+      "decode_tokens_per_second": 16.923171990190518,
+      "passed": true,
+      "total_seconds": 24.50424285896588,
+      "ttft_seconds": 15.770976263913326,
+      "usage": {
+        "completion_tokens": 148,
+        "prompt_tokens": 8192,
+        "total_tokens": 8340
+      }
+    }
+  ],
   "sampler": {
     "chat_template_kwargs": {
       "enable_thinking": true,

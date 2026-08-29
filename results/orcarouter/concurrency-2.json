@@ -3,6 +3,34 @@
   "concurrency": 2,
   "max_tokens": 512,
   "public_revision": "3a3b63161c0745390e5270179af42e46efc70799",
+  "results": [
+    {
+      "correct": true,
+      "decode_seconds": 4.803323761909269,
+      "decode_tokens_per_second": 23.73356568300244,
+      "passed": true,
+      "total_seconds": 12.50717549608089,
+      "ttft_seconds": 7.667900626081973,
+      "usage": {
+        "completion_tokens": 115,
+        "prompt_tokens": 8192,
+        "total_tokens": 8307
+      }
+    },
+    {
+      "correct": true,
+      "decode_seconds": 4.5831951620057225,
+      "decode_tokens_per_second": 23.564346745543443,
+      "passed": true,
+      "total_seconds": 12.231434696936049,
+      "ttft_seconds": 7.603060457971878,
+      "usage": {
+        "completion_tokens": 109,
+        "prompt_tokens": 8192,
+        "total_tokens": 8301
+      }
+    }
+  ],
   "sampler": {
     "chat_template_kwargs": {
       "enable_thinking": true,

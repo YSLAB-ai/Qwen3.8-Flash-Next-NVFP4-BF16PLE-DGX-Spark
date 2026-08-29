@@ -24,6 +24,7 @@ _SCALAR_MEASUREMENTS = {
     "health_status",
     "interval_seconds",
     "long_context_tokens",
+    "latency_seconds",
     "max_model_len",
     "max_tokens",
     "mem_available_bytes",
@@ -39,6 +40,7 @@ _SCALAR_MEASUREMENTS = {
     "ttft_seconds",
     "wall_seconds",
 }
+_PUBLIC_FIXTURES = {"reasoning", "code", "file_edit", "prose", "vision-shapes.png"}
 _FORBIDDEN_TEXT = re.compile(
     r"https?://|/home/|authorization|bearer|api.?key|token|secret|"
     r"reasoning|content|response|request|deployment|header|path|url",
@@ -88,11 +90,16 @@ def _measurement_mapping(value: object) -> dict[str, Any]:
             cleaned[key] = item
         elif key in {"passed", "correct", "exact_retrieval", "oom_killed", "mtp_head_present"} and isinstance(item, bool):
             cleaned[key] = item
-        elif key == "fixture" and isinstance(item, str) and re.fullmatch(r"[a-z0-9_-]{1,64}", item):
+        elif key == "fixture" and item in _PUBLIC_FIXTURES:
             cleaned[key] = item
         elif key == "source" and item == "index_audit":
             cleaned[key] = item
-        elif key in {"validated", "answer"} and isinstance(item, (str, dict)):
+        elif key == "validated" and isinstance(item, bool):
+            cleaned["validated"] = item
+        elif key == "validated" and isinstance(item, (str, dict)):
+            cleaned["validated"] = True
+            cleaned["passed"] = True
+        elif key == "answer" and isinstance(item, str):
             cleaned["passed"] = True
         elif key == "output_sha256" and isinstance(item, str) and re.fullmatch(r"[0-9a-f]{64}", item):
             cleaned[key] = item
@@ -126,6 +133,20 @@ def _functional_results(value: object) -> dict[str, dict[str, Any]]:
         item = _measurement_mapping(result)
         if item:
             cleaned[fixture] = item
+    return cleaned
+
+
+def _concurrency_result(value: object) -> dict[str, Any]:
+    """Retain a per-stream isolation verdict without retaining the marker text."""
+    cleaned = _measurement_mapping(value)
+    if not isinstance(value, dict) or "validated" not in value:
+        return cleaned
+    verdict = value["validated"]
+    if isinstance(verdict, bool):
+        cleaned["correct"] = verdict
+    elif isinstance(verdict, (str, dict)):
+        cleaned["correct"] = True
+    cleaned.pop("validated", None)
     return cleaned
 
 
@@ -170,10 +191,11 @@ def sanitize_data(raw: object) -> dict[str, object]:
             clean[key] = item
     for key in ("samples", "results", "probes"):
         value = raw.get(key)
-        if key == "results":
+        if key == "results" and isinstance(value, dict):
             item = _functional_results(value)
         elif isinstance(value, list):
-            item = [_measurement_mapping(entry) for entry in value]
+            mapper = _concurrency_result if key == "results" else _measurement_mapping
+            item = [mapper(entry) for entry in value]
             item = [entry for entry in item if entry]
         else:
             item = []

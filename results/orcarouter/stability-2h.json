@@ -4,6 +4,7 @@
   "probes": [
     {
       "health_status": 200,
+      "latency_seconds": 4.053325713030063,
       "mem_available_bytes": 15766261760,
       "passed": true,
       "swap_used_bytes": 1993744384,
@@ -15,6 +16,7 @@
     },
     {
       "health_status": 200,
+      "latency_seconds": 4.052695385995321,
       "mem_available_bytes": 16045051904,
       "passed": true,
       "swap_used_bytes": 1940955136,

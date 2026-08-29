@@ -93,6 +93,80 @@ class SanitizeResultsTests(unittest.TestCase):
             self.assertTrue(clean["passed"])
             self.assertNotIn("MOUNTAIN-CINDER-240079", json.dumps(clean))
 
+    def test_sanitizer_preserves_list_shaped_concurrency_results(self):
+        """Concurrency waves need their per-stream timing, usage, and isolation status."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "raw.json"
+            source.write_text(
+                json.dumps(
+                    {
+                        "results": [
+                            {
+                                "validated": "EMBER-01-410001",
+                                "usage": {"prompt_tokens": 8192, "completion_tokens": 64},
+                                "ttft_seconds": 0.2,
+                                "decode_seconds": 2.0,
+                                "decode_tokens_per_second": 31.5,
+                                "content_text": "private marker",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            clean = sanitize_result(source, root / "clean.json")
+
+            self.assertTrue(clean["results"][0]["correct"])
+            self.assertEqual(clean["results"][0]["usage"]["prompt_tokens"], 8192)
+            self.assertEqual(clean["results"][0]["decode_tokens_per_second"], 31.5)
+            self.assertNotIn("private marker", json.dumps(clean))
+
+    def test_sanitizer_preserves_boolean_long_context_validation(self):
+        """A boolean validation outcome is evidence, unlike the response text behind it."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "raw.json"
+            source.write_text(json.dumps({"validated": True}), encoding="utf-8")
+
+            clean = sanitize_result(source, root / "clean.json")
+
+            self.assertIs(clean["validated"], True)
+
+    def test_sanitizer_only_retains_known_public_fixture_ids(self):
+        """Fixture names are an allowlist, not an arbitrary safe-looking string."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "raw.json"
+            source.write_text(
+                json.dumps(
+                    {
+                        "samples": [
+                            {"fixture": "file_edit", "correct": True},
+                            {"fixture": "unreviewed_fixture", "correct": True},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            clean = sanitize_result(source, root / "clean.json")
+
+            self.assertEqual(clean["samples"][0]["fixture"], "file_edit")
+            self.assertNotIn("fixture", clean["samples"][1])
+
+    def test_sanitizer_preserves_stability_probe_latency(self):
+        """A stability probe's latency is a public timing measurement."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "raw.json"
+            source.write_text(json.dumps({"probes": [{"latency_seconds": 1.25}]}), encoding="utf-8")
+
+            clean = sanitize_result(source, root / "clean.json")
+
+            self.assertEqual(clean["probes"][0]["latency_seconds"], 1.25)
+
 
 if __name__ == "__main__":
     unittest.main()
