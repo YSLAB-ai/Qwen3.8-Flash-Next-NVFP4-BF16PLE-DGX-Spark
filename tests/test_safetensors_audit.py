@@ -11,7 +11,7 @@ from pathlib import Path
 
 from recipe.audit import AuditError, audit_checkpoint
 from recipe.manifest import ModelRef, PleExpectation, Target
-from recipe.safetensors import SafetensorsError, read_header
+from recipe.safetensors import SafetensorsError, read_header, write_subset
 
 
 REVISION = "a" * 40
@@ -247,6 +247,92 @@ class SafetensorsAuditTests(unittest.TestCase):
             with assert_raises(SafetensorsError, "duplicate JSON key"):
                 read_header(path)
 
+    def test_write_subset_preserves_payloads_and_is_deterministic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "first.safetensors"
+            second = root / "second.safetensors"
+            write_safetensors(
+                first,
+                {
+                    "mtp.z.weight": {"dtype": "BF16", "shape": [2, 3]},
+                    "ignored.weight": {"dtype": "F32", "shape": [2]},
+                },
+            )
+            write_safetensors(
+                second,
+                {"mtp.a.weight": {"dtype": "BF16", "shape": [1, 4]}},
+            )
+            write_payload(first, "mtp.z.weight", bytes(range(12)))
+            write_payload(second, "mtp.a.weight", bytes(range(40, 48)))
+
+            output = root / "subset.safetensors"
+            repeated = root / "subset-repeated.safetensors"
+            result = write_subset(
+                (("mtp.z.weight", first), ("mtp.a.weight", second)),
+                output,
+                expected_dtype="BF16",
+            )
+            repeated_result = write_subset(
+                (("mtp.a.weight", second), ("mtp.z.weight", first)),
+                repeated,
+                expected_dtype="BF16",
+            )
+
+            self.assertEqual(result.tensor_names, ("mtp.a.weight", "mtp.z.weight"))
+            self.assertEqual(result.sha256, repeated_result.sha256)
+            self.assertEqual(output.read_bytes(), repeated.read_bytes())
+            self.assertEqual(tuple(read_header(output)), result.tensor_names)
+            self.assertEqual(read_payload(output, "mtp.a.weight"), bytes(range(40, 48)))
+            self.assertEqual(read_payload(output, "mtp.z.weight"), bytes(range(12)))
+            self.assertEqual(result.size, output.stat().st_size)
+
+    def test_write_subset_rejects_unsafe_or_inexact_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bf16 = root / "bf16.safetensors"
+            f32 = root / "f32.safetensors"
+            malformed = root / "malformed.safetensors"
+            write_safetensors(bf16, {"mtp.weight": {"dtype": "BF16", "shape": [2]}})
+            write_safetensors(f32, {"mtp.weight": {"dtype": "F32", "shape": [2]}})
+            encoded = json.dumps(
+                {
+                    "mtp.weight": {
+                        "dtype": "BF16",
+                        "shape": [2],
+                        "data_offsets": [0, 3],
+                    }
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+            malformed.write_bytes(struct.pack("<Q", len(encoded)) + encoded + bytes(3))
+
+            cases = (
+                ("duplicate", (("mtp.weight", bf16), ("mtp.weight", bf16)), root / "dup.out"),
+                ("missing", (("missing.weight", bf16),), root / "missing.out"),
+                ("dtype", (("mtp.weight", f32),), root / "dtype.out"),
+                ("byte size", (("mtp.weight", malformed),), root / "geometry.out"),
+                ("destination", (("mtp.weight", bf16),), bf16),
+            )
+            for message, entries, destination in cases:
+                with self.subTest(message=message), assert_raises(SafetensorsError, message):
+                    write_subset(entries, destination, expected_dtype="BF16")
+
+    def test_write_subset_rejects_existing_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.safetensors"
+            destination = root / "destination.safetensors"
+            write_safetensors(source, {"mtp.weight": {"dtype": "BF16", "shape": [2]}})
+            destination.write_bytes(b"preserve")
+
+            with assert_raises(SafetensorsError, "already exists"):
+                write_subset(
+                    (("mtp.weight", source),), destination, expected_dtype="BF16"
+                )
+
+            self.assertEqual(destination.read_bytes(), b"preserve")
+
 
 def make_checkpoint(tmp_path: Path, *, dtype: str = "BF16", scale: bool = False):
     root = tmp_path / "cache"
@@ -332,6 +418,22 @@ def write_safetensors(path: Path, tensors: dict[str, dict[str, object]]) -> None
         offsets += size
     encoded = json.dumps(header, separators=(",", ":")).encode("utf-8")
     path.write_bytes(struct.pack("<Q", len(encoded)) + encoded + bytes(offsets))
+
+
+def write_payload(path: Path, name: str, payload: bytes) -> None:
+    meta = read_header(path)[name]
+    if len(payload) != meta.data_end - meta.data_start:
+        raise AssertionError("payload length does not match tensor")
+    with path.open("r+b") as handle:
+        handle.seek(meta.data_start)
+        handle.write(payload)
+
+
+def read_payload(path: Path, name: str) -> bytes:
+    meta = read_header(path)[name]
+    with path.open("rb") as handle:
+        handle.seek(meta.data_start)
+        return handle.read(meta.data_end - meta.data_start)
 
 
 def _tensor_bytes(dtype: str, shape: object) -> int:

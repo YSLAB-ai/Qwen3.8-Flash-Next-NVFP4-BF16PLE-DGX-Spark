@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 class SafetensorsError(ValueError):
@@ -18,6 +19,19 @@ class DuplicateJsonKeyError(ValueError):
 
 
 _MAX_HEADER_BYTES = 100_000_000
+_COPY_BUFFER_BYTES = 8 * 1024 * 1024
+_DTYPE_BYTES = {
+    "BF16": 2,
+    "F16": 2,
+    "F32": 4,
+    "F64": 8,
+    "F8_E4M3": 1,
+    "F8_E5M2": 1,
+    "F8_E4M3FN": 1,
+    "F8_E4M3FNUZ": 1,
+    "F8_E5M2FN": 1,
+    "F8_E5M2FNUZ": 1,
+}
 
 
 @dataclass(frozen=True)
@@ -26,6 +40,13 @@ class TensorMeta:
     shape: tuple[int, ...]
     data_start: int
     data_end: int
+
+
+@dataclass(frozen=True)
+class SubsetResult:
+    tensor_names: tuple[str, ...]
+    sha256: str
+    size: int
 
 
 def strict_json_loads(document: str | bytes) -> Any:
@@ -113,3 +134,110 @@ def read_header(path: Path) -> dict[str, TensorMeta]:
     if expected_start != file_size:
         raise SafetensorsError(f"tensor data does not occupy the full data buffer: {path}")
     return tensors
+
+
+def write_subset(
+    entries: Iterable[tuple[str, Path]],
+    destination: Path,
+    *,
+    expected_dtype: str,
+) -> SubsetResult:
+    """Stream selected tensors into one deterministic safetensors file.
+
+    Payload bytes are copied directly from the source files. The function never
+    materializes a tensor and refuses to overwrite any existing destination.
+    """
+    requested = list(entries)
+    if not requested:
+        raise SafetensorsError("tensor subset must not be empty")
+    if not isinstance(expected_dtype, str) or expected_dtype not in _DTYPE_BYTES:
+        raise SafetensorsError("unsupported expected dtype")
+
+    names = [name for name, _source in requested]
+    if any(not isinstance(name, str) or not name for name in names):
+        raise SafetensorsError("tensor subset contains an invalid name")
+    if len(names) != len(set(names)):
+        raise SafetensorsError("duplicate tensor selection")
+
+    destination = Path(destination)
+    destination_resolved = destination.resolve(strict=False)
+    sources: dict[Path, dict[str, TensorMeta]] = {}
+    selected: list[tuple[str, Path, TensorMeta]] = []
+    for name, raw_source in requested:
+        try:
+            source = Path(raw_source).resolve(strict=True)
+        except OSError as exc:
+            raise SafetensorsError(f"unable to resolve tensor source: {raw_source}") from exc
+        if source == destination_resolved:
+            raise SafetensorsError("destination aliases a tensor source")
+        if not source.is_file():
+            raise SafetensorsError(f"tensor source is not a file: {raw_source}")
+        header = sources.get(source)
+        if header is None:
+            header = read_header(source)
+            sources[source] = header
+        try:
+            meta = header[name]
+        except KeyError as exc:
+            raise SafetensorsError(f"missing selected tensor: {name}") from exc
+        if meta.dtype != expected_dtype:
+            raise SafetensorsError(
+                f"tensor dtype {meta.dtype} does not match expected {expected_dtype}: {name}"
+            )
+        expected_bytes = _tensor_byte_size(meta)
+        if meta.data_end - meta.data_start != expected_bytes:
+            raise SafetensorsError(f"tensor byte size does not match dtype and shape: {name}")
+        selected.append((name, source, meta))
+
+    selected.sort(key=lambda item: item[0])
+    raw_header: dict[str, dict[str, object]] = {}
+    offset = 0
+    for name, _source, meta in selected:
+        size = meta.data_end - meta.data_start
+        raw_header[name] = {
+            "dtype": meta.dtype,
+            "shape": list(meta.shape),
+            "data_offsets": [offset, offset + size],
+        }
+        offset += size
+    encoded = json.dumps(raw_header, separators=(",", ":")).encode("utf-8")
+    encoded += b" " * (-len(encoded) % 8)
+    prefix = struct.pack("<Q", len(encoded)) + encoded
+
+    digest = hashlib.sha256()
+    try:
+        with destination.open("xb") as output:
+            output.write(prefix)
+            digest.update(prefix)
+            for name, source, meta in selected:
+                remaining = meta.data_end - meta.data_start
+                with source.open("rb") as input_file:
+                    input_file.seek(meta.data_start)
+                    while remaining:
+                        chunk = input_file.read(min(remaining, _COPY_BUFFER_BYTES))
+                        if not chunk:
+                            raise SafetensorsError(f"truncated tensor payload while copying: {name}")
+                        output.write(chunk)
+                        digest.update(chunk)
+                        remaining -= len(chunk)
+    except FileExistsError as exc:
+        raise SafetensorsError(f"destination already exists: {destination}") from exc
+    except Exception:
+        try:
+            destination.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    try:
+        size = destination.stat().st_size
+    except OSError as exc:
+        raise SafetensorsError(f"unable to stat tensor subset: {destination}") from exc
+    return SubsetResult(tuple(name for name, _source, _meta in selected), digest.hexdigest(), size)
+
+
+def _tensor_byte_size(meta: TensorMeta) -> int:
+    size = _DTYPE_BYTES[meta.dtype]
+    for dimension in meta.shape:
+        size *= dimension
+    return size
