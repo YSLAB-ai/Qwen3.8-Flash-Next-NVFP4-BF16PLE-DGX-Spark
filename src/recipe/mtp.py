@@ -59,6 +59,27 @@ MTP_TENSOR_NAMES = (
 )
 
 
+# Compressed-tensors treats ordinary ignore entries as exact module names.  In
+# particular, strings such as ``mtp.*`` are not globs.  These are the modules
+# backed by the native BF16 MTP tensors.  vLLM remaps the layer-zero paths to
+# the standalone draft layer index (currently layer 48) before construction.
+MTP_QUANTIZATION_IGNORE = (
+    "mtp.fc_embedding",
+    "mtp.fc_hidden",
+    "mtp.layers.0.mlp.experts",
+    "mtp.layers.0.mlp.gate",
+    "mtp.layers.0.mlp.shared_expert.down_proj",
+    "mtp.layers.0.mlp.shared_expert.gate_proj",
+    "mtp.layers.0.mlp.shared_expert.up_proj",
+    "mtp.layers.0.mlp.shared_expert_gate",
+    "mtp.layers.0.self_attn.indexer.index_qk_proj",
+    "mtp.layers.0.self_attn.k_proj",
+    "mtp.layers.0.self_attn.o_proj",
+    "mtp.layers.0.self_attn.q_proj",
+    "mtp.layers.0.self_attn.v_proj",
+)
+
+
 _INDEX_NAME = "model.safetensors.index.json"
 _METADATA_NAME = "recipe-metadata.json"
 _COMPACT_NAME = "mtp-bf16.safetensors"
@@ -105,7 +126,7 @@ def build_mtp_overlay(
     _validate_weight_maps(target_index, source_index, target)
 
     fingerprint = hashlib.sha256(
-        f"{target.repo_id}@{target.revision}:{source.repo_id}@{source.revision}:bf16-mtp".encode()
+        f"{target.repo_id}@{target.revision}:{source.repo_id}@{source.revision}:bf16-mtp-v2".encode()
     ).hexdigest()[:16]
     final = output_root / _safe_name(target.name) / fingerprint
     if _path_exists(final):
@@ -233,10 +254,10 @@ def _overlay_config(path: Path) -> bytes:
     ignore = quantization.get("ignore")
     if not isinstance(ignore, list) or not all(isinstance(item, str) for item in ignore):
         raise MtpOverlayError("target quantization ignore list is invalid")
-    additions = ["mtp.*", "model.mtp.*"]
-    if any(item in ignore for item in additions):
+    obsolete = {"mtp.*", "model.mtp.*"}
+    if any(item in ignore for item in (*MTP_QUANTIZATION_IGNORE, *obsolete)):
         raise MtpOverlayError("target config already contains an MTP quantization ignore")
-    quantization["ignore"] = [*ignore, *additions]
+    quantization["ignore"] = [*ignore, *MTP_QUANTIZATION_IGNORE]
     return _json_bytes(config)
 
 

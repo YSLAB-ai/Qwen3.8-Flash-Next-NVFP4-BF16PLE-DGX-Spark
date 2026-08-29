@@ -418,13 +418,17 @@ def _validate_mtp_overlay(
         raise AuditError("MTP overlay config SHA-256 does not match metadata")
 
     config = _load_json_object(model_dir / "config.json", "config")
+    from .mtp import MTP_QUANTIZATION_IGNORE
+
     quantization = config.get("quantization_config")
     ignore = quantization.get("ignore") if isinstance(quantization, dict) else None
+    expected = list(MTP_QUANTIZATION_IGNORE)
     if (
         not isinstance(ignore, list)
-        or ignore[-2:] != ["mtp.*", "model.mtp.*"]
-        or ignore.count("mtp.*") != 1
-        or ignore.count("model.mtp.*") != 1
+        or ignore[-len(expected) :] != expected
+        or any(ignore.count(item) != 1 for item in expected)
+        or "mtp.*" in ignore
+        or "model.mtp.*" in ignore
     ):
         raise AuditError("MTP quantization ignore entries are missing or duplicated")
 

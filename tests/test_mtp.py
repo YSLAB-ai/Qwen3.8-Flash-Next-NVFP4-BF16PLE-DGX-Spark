@@ -10,7 +10,12 @@ from pathlib import Path
 
 from recipe.audit import audit_checkpoint
 from recipe.manifest import MtpShard, MtpSource, PleExpectation, Target
-from recipe.mtp import MTP_TENSOR_NAMES, MtpOverlayError, build_mtp_overlay
+from recipe.mtp import (
+    MTP_QUANTIZATION_IGNORE,
+    MTP_TENSOR_NAMES,
+    MtpOverlayError,
+    build_mtp_overlay,
+)
 from recipe.safetensors import read_header
 from tests.test_safetensors_audit import write_safetensors
 
@@ -44,7 +49,16 @@ class MtpOverlayTests(unittest.TestCase):
             output_config = load_json(view / "config.json")
             self.assertEqual(
                 output_config["quantization_config"]["ignore"],
-                source_config["quantization_config"]["ignore"] + ["mtp.*", "model.mtp.*"],
+                source_config["quantization_config"]["ignore"]
+                + list(MTP_QUANTIZATION_IGNORE),
+            )
+            self.assertNotIn("mtp.*", output_config["quantization_config"]["ignore"])
+            self.assertNotIn(
+                "model.mtp.*", output_config["quantization_config"]["ignore"]
+            )
+            self.assertIn(
+                "mtp.layers.0.mlp.experts",
+                output_config["quantization_config"]["ignore"],
             )
             source_config["quantization_config"].pop("ignore")
             output_config["quantization_config"].pop("ignore")
