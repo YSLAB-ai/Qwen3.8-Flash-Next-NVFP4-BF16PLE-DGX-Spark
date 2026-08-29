@@ -99,6 +99,7 @@ def snapshot_path(cache: Path, ref: ModelRef) -> Path:
     _validate_ref(ref)
     return (
         Path(cache)
+        / "hub"
         / f"models--{ref.repo_id.replace('/', '--')}"
         / "snapshots"
         / ref.revision

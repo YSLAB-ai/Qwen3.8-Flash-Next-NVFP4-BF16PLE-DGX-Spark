@@ -13,6 +13,7 @@ from recipe.download import (
     build_hf_download_command,
     build_hf_login_command,
     download_target,
+    snapshot_path as downloaded_snapshot_path,
 )
 from recipe.manifest import ModelRef, PleExpectation, Target
 
@@ -67,6 +68,19 @@ class FakeRunner:
 
 
 class DownloadTests(unittest.TestCase):
+    def test_snapshot_path_uses_hf_home_hub_layout(self):
+        ref = ModelRef("Qwen/Qwen3.8-Flash-Next", "de4b8e4d43b917e7706784d8bb445c9af86a3540")
+        cache = Path("/safe/hf-cache")
+
+        self.assertEqual(
+            downloaded_snapshot_path(cache, ref),
+            cache
+            / "hub"
+            / "models--Qwen--Qwen3.8-Flash-Next"
+            / "snapshots"
+            / "de4b8e4d43b917e7706784d8bb445c9af86a3540",
+        )
+
     def test_download_command_pins_revision_without_token(self):
         with tempfile.TemporaryDirectory() as directory:
             command = build_hf_download_command(
@@ -140,7 +154,13 @@ class DownloadTests(unittest.TestCase):
 
 
 def snapshot_path(cache: Path, ref: ModelRef | Target) -> Path:
-    return cache / f"models--{ref.repo_id.replace('/', '--')}" / "snapshots" / ref.revision
+    return (
+        cache
+        / "hub"
+        / f"models--{ref.repo_id.replace('/', '--')}"
+        / "snapshots"
+        / ref.revision
+    )
 
 
 if __name__ == "__main__":
